@@ -1,0 +1,22 @@
+# omica-vep — worker da fila "vep" (mesmo padrão sem docker.sock do bioinfo).
+# BINÁRIO moderno (release_113, Ubuntu jammy — a base 110.1 é bionic/py3.6, velha
+# demais p/ a fila RQ) + CACHE PINADO em release 110 via --cache_version no
+# script: o 110 é o último cache bos_taurus em ARS-UCD1.2, compatível com os
+# VCFs do 1000 Bull Genomes Run 8 (armadilha ARS-UCD2.0 verificada 2026-09-02).
+# Cache offline em E:\data\omica\refs\vep (bos_taurus_vep_110_ARS-UCD1.2).
+FROM ensemblorg/ensembl-vep:release_113.0
+
+USER root
+ENV PYTHONUNBUFFERED=1 \
+    OMICA_IN_DOCKER=1 \
+    PYTHONPATH=/app
+
+RUN apt-get update && apt-get install -y python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir \
+       rq==1.16.2 redis==5.2.1 psutil==6.1.0 PyYAML==6.0.2 pydantic==2.10.3 \
+       pytest==8.3.4
+
+WORKDIR /app
+ENTRYPOINT []
+CMD ["rq", "worker", "vep", "--url", "redis://omica-redis:6379/0"]

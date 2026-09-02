@@ -64,6 +64,9 @@ def modulo(request: Request, mod_id: str):
     for rotulo, rel in m.results_spec.items():
         if rel.endswith(".json"):
             resultados.append((rotulo, "json", resultado_do_modulo(rel)))
+        elif rel.endswith((".png", ".svg")):
+            existe = (get_config().results_dir / rel).exists()
+            resultados.append((rotulo, "img", f"/resultados/{rel}" if existe else None))
         else:
             resultados.append((rotulo, "tabela", carregar_tabela(rel)))
     return _render(request, "modulo.html", m=m, fluxo_svg=svg_do_modulo(m),
@@ -194,6 +197,19 @@ def _saude_dados() -> dict:
         "erros_manifests": reg.erros,
         "data_dir": str(cfg.data_dir),
     }
+
+
+@app.get("/resultados/{rel:path}")
+def servir_resultado(rel: str):
+    """Serve UM arquivo de resultado (figura/tabela) de dentro de results_dir —
+    caminho resolvido e validado para nunca sair do diretório de resultados."""
+    base = get_config().results_dir.resolve()
+    caminho = (base / rel).resolve()
+    if not caminho.is_file() or base not in caminho.parents:
+        return RedirectResponse("/", status_code=303)
+    from fastapi.responses import FileResponse
+
+    return FileResponse(caminho)
 
 
 @app.get("/saude")

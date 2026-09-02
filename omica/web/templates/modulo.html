@@ -81,6 +81,8 @@
   <h3>{{ rotulo }}</h3>
   {% if dados is none %}
     <p>{{ t('sem_resultado', lang) }}</p>
+  {% elif tipo == 'img' %}
+    <img src="{{ dados }}" alt="{{ rotulo }}" style="max-width:100%;border:1px solid var(--borda);border-radius:8px">
   {% elif tipo == 'json' %}
     <table><tbody>
       {% for chave, valor in dados.items() %}

@@ -20,6 +20,8 @@ FILA_POR_IMAGEM = {
     "omica-web": queue.FILA_DEFAULT,
     "omica-worker": queue.FILA_DEFAULT,
     "omica-bioinfo": "bioinfo",
+    "omica-vep": "vep",
+    "omica-methyl": "methyl",
 }
 
 

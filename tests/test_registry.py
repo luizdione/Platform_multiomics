@@ -71,16 +71,32 @@ def test_runtime_invalido_e_rejeitado():
 
 
 def test_honestidade_dos_status():
-    # Módulos ainda não migrados ficam "em construção"; a genômica (Fase 2 em
-    # curso) já tem scripts declarados e etapas fora de "planejado".
+    # Só a transcriptômica segue "em construção" (Fase 4); genômica e
+    # epigenômica têm scripts reais e etapas fora de "planejado".
     reg = load_registry(MODULES_DIR)
-    for mod_id in ("epigenomica", "transcriptomica"):
-        m = reg.por_id(mod_id)
-        assert m is not None and m.em_construcao() and not m.scripts
+    tra = reg.por_id("transcriptomica")
+    assert tra is not None and tra.em_construcao() and not tra.scripts
     gen = reg.por_id("genomica")
     assert gen is not None and not gen.em_construcao()
     assert {s.key for s in gen.scripts} == {
         "extracao_demo", "frequencias_demo", "anotacao_demo",
-        "coordenadas_painel", "integridade_vcf", "fst_racas",
+        "coordenadas_painel", "integridade_vcf", "fst_racas", "vep_demo",
     }
-    assert gen.results_spec  # UI só mostra número lido de arquivo
+    epi = reg.por_id("epigenomica")
+    assert epi is not None and not epi.em_construcao()
+    assert {s.key for s in epi.scripts} == {"dmc_demo", "intersecao_demo", "tss_demo"}
+    assert gen.results_spec and epi.results_spec  # UI só mostra número lido de arquivo
+
+
+def test_painel_108_versionado_com_contagem_canonica():
+    import json
+
+    from omica.config import REPO_ROOT
+
+    painel = json.loads((REPO_ROOT / "modules/epigenomica/data/paineis/painel_108.json")
+                        .read_text(encoding="utf-8"))
+    assert painel["_meta"]["n_genes"] == 108
+    assert len(painel["genes"]) == 108  # fim das contagens 45/49/53
+    bed = (REPO_ROOT / "modules/epigenomica/data/paineis/painel_108.bed") \
+        .read_text(encoding="utf-8").splitlines()
+    assert len(bed) == 108

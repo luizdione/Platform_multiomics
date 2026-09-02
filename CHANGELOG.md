@@ -2,6 +2,37 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [0.4.0] — 2026-09-02 · VEP + Fase 3 (epigenômica)
+
+### Adicionado — VEP (fecha a Fase 2)
+- Fila **vep** + worker `omica-vep`: binário release_113 (a base 110.1 é
+  bionic/py3.6, velha demais p/ RQ) com **cache PINADO em release 110 via
+  `--cache_version`** — último cache bos_taurus em ARS-UCD1.2, compatível com o
+  Run 8 (cache de 1,29 GB baixado para `E:\data\omica\refs\vep`).
+- `vep_anotacao.py` + card na UI + results_spec; smoke 1/1 (60 s, >1000
+  variantes anotadas do demo).
+
+### Adicionado — Fase 3 · Epigenômica
+- **Painel 108 VERSIONADO** (`data/paineis/painel_108.{json,bed}`) convertido da
+  TableS1 curada do manuscrito, com proveniência no `_meta` — 108 genes exatos,
+  fim das contagens divergentes (45/49/53); teste trava a contagem canônica.
+- Fila **methyl** + worker `omica-methyl`: rocker/rstudio:4.2 + **volume
+  `epigenoma_r_lib` reaproveitado** (methylKit/GenomicRanges/ChIPseeker/DESeq2 já
+  compilados pela plataforma antiga — zero build Bioconductor).
+- Demo real versionado: 6 coverages Bismark CD4 (3 Nelore × 3 Holstein, ~430 KB)
+  do depósito Zenodo do próprio paper.
+- 3 análises migradas por cópia curada: `metilacao_dmc.R` (methylKit, limiares
+  do paper |diff|>15%, q<0,05), `intersecao_dmc_painel.py` (Python puro, rótulo
+  honesto — o legado dizia "BEDTools"), `perfil_tss.py` (metaperfil ±2 kb do TSS
+  dos 108 genes, PNG matplotlib).
+- Workflow **wf_metilacao_demo** SELADO (fila methyl real, depends_on).
+- UI: resultados de imagem (PNG/SVG) servidos por `/resultados/{rel}` com guarda
+  de caminho; figura do TSS embutida na página do módulo.
+
+### Testes
+- Suíte 42 passed; smokes por container: methyl 2/2 (17 s), vep 1/1 (60 s),
+  bioinfo 5/5. E2E via UI: workflow metilação (2 passos), TSS e VEP — todos done.
+
 ## [0.3.0] — 2026-09-02 · Workflows encadeados + Professor Ômico + Fase 2 (restante)
 
 ### Adicionado — motor de workflows (determinístico, zero LLM)

@@ -1,0 +1,22 @@
+# omica-methyl — worker da fila "methyl" (epigenômica).
+# REUSO MÁXIMO: base rocker/rstudio:4.2 (já presente na máquina) + as
+# bibliotecas R JÁ COMPILADAS no volume docker `epigenoma_r_lib` da plataforma
+# antiga (methylKit, GenomicRanges, ChIPseeker, DESeq2, jsonlite... — horas de
+# compilação Bioconductor poupadas), montado como /rlib via R_LIBS_USER.
+# Python entra só para a fila RQ + perfil TSS (numpy/matplotlib).
+FROM rocker/rstudio:4.2
+
+ENV PYTHONUNBUFFERED=1 \
+    OMICA_IN_DOCKER=1 \
+    PYTHONPATH=/app \
+    R_LIBS_USER=/rlib
+
+RUN apt-get update && apt-get install -y python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir \
+       rq==1.16.2 redis==5.2.1 psutil==6.1.0 PyYAML==6.0.2 pydantic==2.10.3 \
+       numpy==1.26.4 matplotlib==3.9.2 pytest==8.3.4
+
+WORKDIR /app
+ENTRYPOINT []
+CMD ["rq", "worker", "methyl", "--url", "redis://omica-redis:6379/0"]

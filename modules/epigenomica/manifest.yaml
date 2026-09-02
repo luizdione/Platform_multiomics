@@ -1,5 +1,9 @@
-# Módulo Epigenômica — manifest (Fase 3 do plano migra o pipeline de metilação da
-# epigenome_platform congelada e traz o painel 108 do OneDrive para dado versionado).
+# Módulo Epigenômica — manifest (Fase 3, migração curada da epigenome_platform
+# congelada). Fila "methyl": worker = rocker/rstudio:4.2 + volume epigenoma_r_lib
+# (bibliotecas R JÁ COMPILADAS pela plataforma antiga — reuso, zero build
+# Bioconductor). Demo REAL versionado: 6 coverages Bismark CD4 (3 Nelore × 3
+# Holstein) do depósito Zenodo do próprio paper. PAINEL 108 VERSIONADO em
+# data/paineis/ com proveniência — fim das contagens divergentes (45/49/53).
 id: epigenomica
 nome_pt: Epigenômica
 nome_en: Epigenomics
@@ -7,42 +11,111 @@ icone: "🧭"
 ordem: 2
 descricao_pt: >-
   Metilação comparativa (RRBS/WGBS) indicino × taurino: DMCs (methylKit), interseção
-  DMR × genes-alvo, perfis TSS, motifs (HOMER) e integração com SNPs (MOFA2).
+  com o painel 108 versionado, metaperfis TSS e (nas próximas levas) HOMER e MOFA2.
 descricao_en: >-
-  Comparative methylation (RRBS/WGBS) indicine × taurine: DMCs (methylKit), DMR ×
-  target-gene intersection, TSS profiles, motifs (HOMER) and SNP integration (MOFA2).
+  Comparative methylation (RRBS/WGBS) indicine × taurine: DMCs (methylKit),
+  intersection with the versioned 108-gene panel, TSS metaprofiles; HOMER/MOFA2 next.
 fases:
   - id: epi_fase1
     nome: Fase 1 · Metilação diferencial
-    descricao: Importação de coberturas, QC e DMCs (methylKit, |diff|>15%, q<0,05).
-    etapas:
-      - key: importar_coberturas
-        desc: Importação/QC de arquivos de cobertura RRBS/WGBS
-        auto: true
-        status_type: planejado
-      - key: dmcs_methylkit
-        desc: DMCs com methylKit no container omica-r-methyl (renv.lock)
-        auto: true
-        status_type: planejado
-  - id: epi_fase2
-    nome: Fase 2 · Interseção e anotação
-    descricao: DMR × painel de genes (108 genes, versionado com proveniência), perfis TSS, HOMER.
+    descricao: Coverages Bismark → DMCs (methylKit, |diff|>15%, q<0,05, BH).
     etapas:
       - key: painel_108
-        desc: Painel 108 genes trazido do OneDrive para modules/epigenomica/data/paineis (contagem canônica)
+        desc: Painel 108 versionado (data/paineis/painel_108.json+bed, proveniência TableS1 curada)
         auto: false
-        status_type: planejado
-      - key: intersecao_dmr
-        desc: Interseção DMR × genes-alvo (reuso do módulo Python puro da plataforma antiga)
+        status_type: concluido
+      - key: dmcs_methylkit
+        desc: DMCs com methylKit no worker omica-methyl (R libs do volume epigenoma_r_lib)
         auto: true
-        status_type: planejado
+        status_type: concluido
+  - id: epi_fase2
+    nome: Fase 2 · Interseção e perfis
+    descricao: DMC × painel 108 e metaperfil de metilação ao redor do TSS.
+    etapas:
+      - key: intersecao_dmc
+        desc: Interseção DMC × janelas ±15 kb do painel 108 (Python puro, rótulo honesto)
+        auto: true
+        status_type: concluido
       - key: perfis_tss
-        desc: Heatmaps de perfil TSS (numpy/matplotlib)
+        desc: Metaperfil de metilação ±2 kb do TSS por grupo (numpy/matplotlib)
         auto: true
-        status_type: planejado
+        status_type: concluido
       - key: motifs_homer
-        desc: Motifs de TF nas DMRs (HOMER, container omica-homer)
+        desc: "HOMER (adiado: imagem própria + genomas configurados — próxima leva)"
         auto: true
         status_type: planejado
-scripts: []
-results_spec: {}
+      - key: mofa2
+        desc: "MOFA2 metilação×SNPs (adiado: job opcional pesado — próxima leva)"
+        auto: true
+        status_type: planejado
+scripts:
+  - key: dmc_demo
+    titulo: "DMCs Nelore × Holstein (demo CD4)"
+    descricao: >-
+      methylKit sobre os 6 coverages reais versionados (3 Nelore × 3 HF, células
+      CD4): CpGs comuns, teste por CpG e DMCs com |diff|>15%, q<0,05.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      Rscript modules/epigenomica/scripts/metilacao_dmc.R
+      --dir {dir_cov} --grupo-a {grupo_a} --grupo-b {grupo_b}
+      --min-cov {min_cov} --diff 15 --qvalue 0.05
+      --saida {dados}/results/epigenomica/demo/dmc
+    params:
+      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data"}
+      - {name: grupo_a, rotulo: "Grupo A (padrão no nome do arquivo)", default: "Nelore"}
+      - {name: grupo_b, rotulo: "Grupo B (padrão no nome do arquivo)", default: "HF"}
+      - {name: min_cov, rotulo: "Cobertura mínima por CpG", default: "5"}
+    inputs: ["modules/epigenomica/demo_data"]
+    outputs: ["results/epigenomica/demo/dmc/dmc.tsv", "results/epigenomica/demo/dmc/dmc_resumo.json"]
+    mem_gb: 3
+    cpus: 1
+    tempo_estimado: "~1 min"
+  - key: intersecao_demo
+    titulo: "Interseção DMC × painel 108"
+    descricao: Conta DMCs (hiper/hipo) por janela ±15 kb de cada gene do painel versionado.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/intersecao_dmc_painel.py
+      --dmc {dados}/results/epigenomica/demo/dmc/dmc.tsv
+      --painel modules/epigenomica/data/paineis/painel_108.bed
+      --saida {dados}/results/epigenomica/demo/intersecao
+    inputs: ["results/epigenomica/demo/dmc/dmc.tsv", "modules/epigenomica/data/paineis/painel_108.bed"]
+    outputs: ["results/epigenomica/demo/intersecao/intersecao.tsv", "results/epigenomica/demo/intersecao/intersecao_resumo.json"]
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~10 s"
+  - key: tss_demo
+    titulo: "Metaperfil TSS (demo CD4)"
+    descricao: Metilação média por bin ±2 kb do TSS dos 108 genes, Nelore vs Holstein.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/perfil_tss.py
+      --dir {dir_cov} --painel modules/epigenomica/data/paineis/painel_108.json
+      --grupo-a Nelore --grupo-b HF --janela 2000 --bin 100
+      --saida {dados}/results/epigenomica/demo/tss
+    params:
+      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data"}
+    inputs: ["modules/epigenomica/demo_data", "modules/epigenomica/data/paineis/painel_108.json"]
+    outputs: ["results/epigenomica/demo/tss/tss_perfil.png", "results/epigenomica/demo/tss/tss_resumo.json"]
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~30 s"
+workflows:
+  - id: wf_metilacao_demo
+    titulo: "Da cobertura Bismark ao painel 108 (demo CD4)"
+    descricao: >-
+      DMCs Nelore×Holstein (methylKit) → interseção com as janelas ±15 kb do
+      painel 108 versionado. O metaperfil TSS roda à parte sobre os mesmos dados.
+    passos: [dmc_demo, intersecao_demo]
+    testado_em: "2026-09-02"
+    testado_por: "Claude (fila methyl real, depends_on: DMC → interseção painel 108)"
+    nota_didatica: >-
+      Os coverages demo são dados REAIS do depósito Zenodo do paper (CD4,
+      filtrados) — os mesmos limiares do manuscrito (|diff|>15%, q<0,05).
+results_spec:
+  "DMCs (resumo)": "epigenomica/demo/dmc/dmc_resumo.json"
+  "DMCs (tabela)": "epigenomica/demo/dmc/dmc.tsv"
+  "Interseção painel 108 (resumo)": "epigenomica/demo/intersecao/intersecao_resumo.json"
+  "Interseção painel 108 (por gene)": "epigenomica/demo/intersecao/intersecao.tsv"
+  "Metaperfil TSS (resumo)": "epigenomica/demo/tss/tss_resumo.json"
+  "Metaperfil TSS (figura)": "epigenomica/demo/tss/tss_perfil.png"

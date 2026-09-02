@@ -49,9 +49,9 @@ fases:
         auto: true
         status_type: concluido
       - key: vep
-        desc: "Anotação VEP (adiada: exige imagem/worker próprios + cache bovino ~2 GB — planejada com fila dedicada)"
+        desc: "Anotação VEP offline (release 110 pinado — o VEP atual usa ARS-UCD2.0, incompatível com o Run 8; cache local em refs/vep)"
         auto: true
-        status_type: planejado
+        status_type: concluido
 scripts:
   - key: extracao_demo
     titulo: "Extração por painel (demo BTA14)"
@@ -149,6 +149,21 @@ scripts:
     mem_gb: 4
     cpus: 2
     tempo_estimado: "1–3 min"
+  - key: vep_demo
+    titulo: "Anotação VEP (demo)"
+    descricao: >-
+      Ensembl VEP offline sobre as variantes extraídas — release 110 PINADO
+      (último com bos_taurus em ARS-UCD1.2; o atual usa ARS-UCD2.0).
+    runtime: "image:omica-vep"
+    cmd: >-
+      python3 modules/genomica/scripts/vep_anotacao.py
+      --entrada {dados}/results/genomica/demo/extracao/extraido.vcf.gz
+      --saida {dados}/results/genomica/demo/vep
+    inputs: ["results/genomica/demo/extracao/extraido.vcf.gz", "E:\\data\\omica\\refs\\vep\\bos_taurus"]
+    outputs: ["results/genomica/demo/vep/vep_resumo.json", "results/genomica/demo/vep/efeitos_vep.tsv"]
+    mem_gb: 4
+    cpus: 1
+    tempo_estimado: "2–5 min"
 workflows:
   - id: wf_painel_demo
     titulo: "Do painel ao efeito funcional (demo BTA14)"
@@ -172,3 +187,5 @@ results_spec:
   "Integridade 1000BG (tabela)": "genomica/integridade/integridade.tsv"
   "Fst Angus×Nelore (resumo)": "genomica/fst/fst_resumo.json"
   "Fst Angus×Nelore (top)": "genomica/fst/fst_top.tsv"
+  "VEP (resumo)": "genomica/demo/vep/vep_resumo.json"
+  "VEP (consequências)": "genomica/demo/vep/efeitos_vep.tsv"
