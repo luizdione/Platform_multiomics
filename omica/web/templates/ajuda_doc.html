@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ doc }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="/ajuda?lang={{ lang }}">{{ t('voltar', lang) }}</a>
+<article class="doc">
+  {{ corpo | safe }}
+</article>
+{% endblock %}

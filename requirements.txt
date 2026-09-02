@@ -1,0 +1,15 @@
+# Lock pinado para as imagens Docker (fonte das faixas: pyproject.toml).
+# Anti-lição nº 3 da auditoria: o container SEMPRE instala deste lock; nenhuma
+# página pode importar pacote que não esteja aqui.
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+jinja2==3.1.4
+pydantic==2.10.3
+PyYAML==6.0.2
+psutil==6.1.0
+redis==5.2.1
+rq==1.16.2
+markdown==3.7
+# — teste dentro do container (docker compose run --rm web pytest) —
+pytest==8.3.4
+httpx==0.28.1

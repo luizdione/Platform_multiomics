@@ -1,0 +1,56 @@
+# Plataforma ômica — localhost :8710
+# Config única: o compose lê o .env da raiz (OMICA_PORT, GENOME_DATA, SKILLS_DIR...).
+# Redis fica SEM porta no host (rede interna) para não colidir com o redis do bonder.
+name: omica
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    image: omica-web
+    container_name: omica-web
+    ports:
+      - "${OMICA_PORT:-8710}:8710"
+    environment:
+      OMICA_IN_DOCKER: "1"
+      OMICA_PORT: "8710"
+      OMICA_DATA: /data/omica
+      GENOME_DATA: /data
+      SKILLS_DIR: /skills
+      OMICA_REDIS_URL: redis://omica-redis:6379/0
+      OMICA_MAX_RAM_GB: "${OMICA_MAX_RAM_GB:-24}"
+    volumes:
+      - ./:/app
+      - "${GENOME_DATA:-E:/data}:/data"
+      - "${SKILLS_DIR:-C:/Users/luizd/.claude/skills_bioinfo}:/skills:ro"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    image: omica-web
+    container_name: omica-worker
+    command: rq worker omica --url redis://omica-redis:6379/0
+    environment:
+      OMICA_IN_DOCKER: "1"
+      OMICA_DATA: /data/omica
+      GENOME_DATA: /data
+      SKILLS_DIR: /skills
+      OMICA_REDIS_URL: redis://omica-redis:6379/0
+      OMICA_MAX_RAM_GB: "${OMICA_MAX_RAM_GB:-24}"
+    volumes:
+      - ./:/app
+      - "${GENOME_DATA:-E:/data}:/data"
+      - "${SKILLS_DIR:-C:/Users/luizd/.claude/skills_bioinfo}:/skills:ro"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: omica-redis
+    restart: unless-stopped

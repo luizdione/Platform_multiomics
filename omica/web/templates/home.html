@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ t('nav_inicio', lang) }}{% endblock %}
+{% block conteudo %}
+<section class="hero">
+  <h1>{{ t('titulo_plataforma', lang) }}</h1>
+  <p>{{ t('subtitulo', lang) }}</p>
+</section>
+
+<h2>{{ t('modulos', lang) }}</h2>
+<section class="cards">
+  {% for m in registry.modules %}
+  <a class="card" href="/modulos/{{ m.id }}?lang={{ lang }}">
+    <span class="icone">{{ m.icone }}</span>
+    <h3>{{ m.nome_pt if lang == 'pt' else m.nome_en }}</h3>
+    <p>{{ m.descricao_pt if lang == 'pt' else m.descricao_en }}</p>
+    <p class="meta">
+      {{ m.fases | length }} {{ t('fases', lang) }} ·
+      {{ m.fases | map(attribute='etapas') | map('length') | sum }} {{ t('etapas', lang) }}
+      {% if m.em_construcao() %}<span class="badge planejado">{{ t('em_construcao', lang) }}</span>{% endif %}
+    </p>
+  </a>
+  {% endfor %}
+</section>
+
+<h2>{{ t('saude', lang) }}</h2>
+<section class="saude">
+  <ul>
+    <li>{{ t('versao', lang) }}: <code>{{ saude.versao }}</code></li>
+    <li>{{ t('ram_sistema', lang) }}: {{ '%.0f' % saude.ram_pct }}% (limite {{ saude.ram_limite_pct }}%)</li>
+    <li>{{ t('fila_backend', lang) }}: <code>{{ saude.fila_backend }}</code></li>
+    <li>{{ saude.modulos_validos }} {{ t('manifests_ok', lang) }} · <code>{{ saude.data_dir }}</code></li>
+    {% if saude.erros_manifests %}
+    <li class="erro">{{ t('erros_manifests', lang) }}:
+      {% for pasta, msg in saude.erros_manifests.items() %}<code>{{ pasta }}</code>: {{ msg }} {% endfor %}
+    </li>
+    {% endif %}
+  </ul>
+</section>
+{% endblock %}

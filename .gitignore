@@ -1,0 +1,68 @@
+# ========================
+# Config local (a config é única e vive no .env — nunca commitá-lo)
+# ========================
+.env
+
+# ========================
+# Python
+# ========================
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+
+# ========================
+# R (containers R chegam nas fases 3-4)
+# ========================
+.Rhistory
+.RData
+.Rproj.user/
+r_lib/
+
+# ========================
+# IDE / SO
+# ========================
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ========================
+# Dados de bioinformática (pesados ficam em E:\data\omica, nunca no repo)
+# ========================
+*.gz
+*.bam
+*.sam
+*.bai
+*.vcf
+*.vcf.gz
+*.fa
+*.fasta
+*.fai
+*.bigwig
+*.bw
+*.rds
+*.tmp
+*.log
+
+# EXCEÇÃO: dados demo pequenos (<10 MB) são versionados de propósito —
+# são o insumo dos smoke tests e do modo aula.
+!modules/*/demo_data/**
+
+# ========================
+# Barreira anti-IP (herdada da epigenome_platform, auditoria 2026-07-03):
+# manuscrito/artigo NUNCA entra no repo da plataforma.
+# ========================
+paper/
+paper_*/
+artigos_submissao/
+PROPRIEDADE_INTELECTUAL/
+OBSOLETOS/
+.backups/

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ t('nav_ajuda', lang) }}{% endblock %}
+{% block conteudo %}
+<h1>{{ t('ajuda_titulo', lang) }}</h1>
+<ul class="lista-docs">
+  {% for doc in docs %}
+  <li><a href="/ajuda/{{ doc }}?lang={{ lang }}">📘 {{ doc | replace('_', ' ') | replace('.md', '') }}</a></li>
+  {% endfor %}
+</ul>
+{% endblock %}

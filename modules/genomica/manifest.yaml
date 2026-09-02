@@ -1,0 +1,46 @@
+# Módulo Genômica — manifest (Fase 2 do plano migra os scripts vivos da
+# genomes_platform congelada; até lá, etapas ficam "planejado" e a UI mostra
+# o módulo como em construção — nunca módulo morto fingindo funcionar).
+id: genomica
+nome_pt: Genômica
+nome_en: Genomics
+icone: "🧬"
+ordem: 1
+descricao_pt: >-
+  Variantes WGS (1000 Bull Genomes Run 8, ARS-UCD1.2), painéis de genes, anotação
+  funcional (SnpEff/VEP), frequências alélicas, Fst e estrutura populacional.
+descricao_en: >-
+  WGS variants (1000 Bull Genomes Run 8, ARS-UCD1.2), gene panels, functional
+  annotation (SnpEff/VEP), allele frequencies, Fst and population structure.
+fases:
+  - id: gen_fase1
+    nome: Fase 1 · Preparação de dados
+    descricao: Coordenadas de genes (Ensembl), metadados de amostras, integridade dos VCFs.
+    compartilhada: true
+    etapas:
+      - key: coordenadas_ensembl
+        desc: "Coordenadas dos genes-alvo via Ensembl REST (legado: buscar_allgenes_coordenadas_ensembl.py)"
+        auto: true
+        status_type: planejado
+      - key: integridade_vcf
+        desc: "Integridade e índices .tbi dos VCFs em E:\\data\\1000bg_vcf (legado: check_vcf_integrity.py)"
+        auto: true
+        status_type: planejado
+  - id: gen_fase2
+    nome: Fase 2 · Extração e anotação
+    descricao: Extração por região (bcftools -R), anotação SnpEff (db custom ARS-UCD1.3) e VEP.
+    etapas:
+      - key: extracao_regioes
+        desc: Extração de variantes por painel de genes (bcftools via imagem omica-bioinfo)
+        auto: true
+        status_type: planejado
+      - key: anotacao_snpeff
+        desc: Anotação funcional SnpEff (corrigindo o bug /opt/snpEff da plataforma antiga)
+        auto: true
+        status_type: planejado
+      - key: frequencias
+        desc: MAF/Fst/HWE por raça (plink2)
+        auto: true
+        status_type: planejado
+scripts: []
+results_spec: {}

@@ -1,0 +1,40 @@
+# Módulo Transcriptômica — manifest (Fase 4 do plano: SRA + nf-core/rnaseq via
+# profile nfcore herdado da genomes_platform + DESeq2 no container omica-r-stats).
+id: transcriptomica
+nome_pt: Transcriptômica
+nome_en: Transcriptomics
+icone: "🧵"
+ordem: 3
+descricao_pt: >-
+  RNA-seq bulk: download SRA, QC (FastQC/MultiQC), quantificação nf-core/rnaseq
+  (STAR+Salmon) e expressão diferencial (DESeq2) integrada aos painéis de genes.
+descricao_en: >-
+  Bulk RNA-seq: SRA download, QC (FastQC/MultiQC), nf-core/rnaseq quantification
+  (STAR+Salmon) and differential expression (DESeq2) integrated with gene panels.
+fases:
+  - id: tra_fase1
+    nome: Fase 1 · Aquisição e QC
+    descricao: Download SRA e controle de qualidade dos FASTQ.
+    etapas:
+      - key: download_sra
+        desc: Download de corridas SRA (SRA Toolkit na imagem omica-bioinfo)
+        auto: true
+        status_type: planejado
+      - key: qc_fastqc
+        desc: FastQC por amostra + MultiQC consolidado
+        auto: true
+        status_type: planejado
+  - id: tra_fase2
+    nome: Fase 2 · Quantificação e expressão diferencial
+    descricao: nf-core/rnaseq 3.14 (profile nfcore, truque DinD /e/data herdado) e DESeq2.
+    etapas:
+      - key: nfcore_rnaseq
+        desc: Quantificação Salmon via nf-core/rnaseq (único serviço com docker.sock)
+        auto: true
+        status_type: planejado
+      - key: deseq2
+        desc: Contrastes DESeq2 no container omica-r-stats (renv.lock)
+        auto: true
+        status_type: planejado
+scripts: []
+results_spec: {}

@@ -1,0 +1,20 @@
+# omica-web — imagem única da Fase 1 (web E worker usam esta; o worker só muda o
+# command no compose). Dockerfile.worker separado chega na fase de ML, quando as
+# dependências pesadas (sklearn/xgboost/shap) entrarem — anti-lição nº 2: nada de
+# arquivo morto antes da hora.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    OMICA_IN_DOCKER=1
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+
+COPY . /app
+RUN pip install -e . --no-deps
+
+EXPOSE 8710
+CMD ["python", "-m", "omica", "serve"]

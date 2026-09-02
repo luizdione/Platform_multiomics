@@ -1,0 +1,82 @@
+/* omica.css — design system mínimo e documentado (anti-lição nº 10: nada de
+   1331 linhas de CSS-hack). Paleta e tokens num lugar só. */
+:root {
+  --fundo: #f7f9fa;
+  --painel: #ffffff;
+  --tinta: #1f2d3d;
+  --tinta-suave: #5c6b7a;
+  --primaria: #0f766e;
+  --primaria-escura: #115e59;
+  --borda: #dde4ea;
+  --alerta-fundo: #fef3c7;
+  --alerta-borda: #f59e0b;
+  --erro: #e74c3c;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--fundo); color: var(--tinta);
+  font: 16px/1.55 "Segoe UI", system-ui, sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+a { color: var(--primaria); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.topo {
+  display: flex; align-items: center; gap: 1.5rem;
+  background: var(--primaria-escura); color: #fff; padding: .7rem 1.2rem;
+}
+.topo a { color: #e6fffa; }
+.topo .marca { font-size: 1.15rem; color: #fff; }
+.topo nav { display: flex; gap: 1rem; flex: 1; }
+.idiomas .ativo { font-weight: 700; text-decoration: underline; }
+
+.hero h1 { margin-bottom: .2rem; }
+.hero p { color: var(--tinta-suave); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+.card {
+  background: var(--painel); border: 1px solid var(--borda); border-radius: 10px;
+  padding: 1rem; color: inherit; display: block;
+}
+.card:hover { border-color: var(--primaria); text-decoration: none; }
+.card .icone { font-size: 1.6rem; }
+.card h3 { margin: .3rem 0; }
+.card .meta { color: var(--tinta-suave); font-size: .85rem; }
+
+.badge {
+  display: inline-block; color: #fff; border-radius: 999px;
+  padding: .1rem .6rem; font-size: .75rem; vertical-align: middle;
+}
+.badge.planejado { background: #95a5a6; }
+.badge.compartilhada { background: #6b7280; }
+.badge.job-queued { background: #f39c12; }
+.badge.job-running { background: #3498db; }
+.badge.job-done { background: #27ae60; }
+.badge.job-error { background: var(--erro); }
+
+table { width: 100%; border-collapse: collapse; background: var(--painel); }
+th, td { border: 1px solid var(--borda); padding: .45rem .6rem; text-align: left; }
+thead th { background: #eef3f6; }
+
+.saude ul { background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 1rem 2rem; }
+.saude .erro { color: var(--erro); }
+
+button {
+  background: var(--primaria); color: #fff; border: 0; border-radius: 8px;
+  padding: .55rem 1.1rem; font-size: 1rem; cursor: pointer;
+}
+button:hover { background: var(--primaria-escura); }
+
+.alerta { background: var(--alerta-fundo); border-left: 4px solid var(--alerta-borda); padding: .6rem .9rem; }
+.console {
+  background: #0b1520; color: #d1fae5; border-radius: 8px; padding: 1rem;
+  min-height: 8rem; max-height: 24rem; overflow-y: auto; white-space: pre-wrap;
+}
+.voltar { display: inline-block; margin-bottom: .8rem; color: var(--tinta-suave); }
+.fase { margin-top: 1.4rem; }
+.doc, .lista-docs { background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 1rem 1.5rem; }
+.lista-docs { list-style: none; }
+.lista-docs li { margin: .4rem 0; }
+.rodape { text-align: center; color: var(--tinta-suave); font-size: .85rem; padding: 1rem; }
+code { background: #eef3f6; padding: .05rem .3rem; border-radius: 4px; }
+.console code { background: transparent; }

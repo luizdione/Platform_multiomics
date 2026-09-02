@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ t('nav_jobs', lang) }}{% endblock %}
+{% block conteudo %}
+<h1>{{ t('jobs_titulo', lang) }}</h1>
+{% if aviso %}<p class="alerta">⚠️ {{ t('recusado_ram', lang) }}: {{ aviso }}</p>{% endif %}
+<p>{{ t('demo_explica', lang) }}</p>
+<form method="post" action="/jobs/demo"><button type="submit">{{ t('rodar_demo', lang) }}</button></form>
+
+{% if jobs %}
+<table>
+  <thead><tr><th>{{ t('job', lang) }}</th><th>{{ t('status', lang) }}</th><th>{{ t('atualizado', lang) }}</th></tr></thead>
+  <tbody>
+    {% for j in jobs %}
+    <tr>
+      <td><a href="/jobs/{{ j.job_id }}?lang={{ lang }}">{{ j.job_id }}</a></td>
+      <td><span class="badge job-{{ j.status }}">{{ t('status_' + j.status, lang) }}</span></td>
+      <td>{{ j.updated }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>{{ t('sem_jobs', lang) }}</p>
+{% endif %}
+{% endblock %}

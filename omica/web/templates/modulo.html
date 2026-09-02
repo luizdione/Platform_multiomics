@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ m.nome_pt if lang == 'pt' else m.nome_en }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="/?lang={{ lang }}">{{ t('voltar', lang) }}</a>
+<h1>{{ m.icone }} {{ m.nome_pt if lang == 'pt' else m.nome_en }}</h1>
+<p>{{ m.descricao_pt if lang == 'pt' else m.descricao_en }}</p>
+
+{% for fase in m.fases %}
+<section class="fase">
+  <h2>{{ fase.nome }}{% if fase.compartilhada %} <span class="badge compartilhada">tronco comum</span>{% endif %}</h2>
+  <p>{{ fase.descricao }}</p>
+  <table>
+    <thead><tr><th>{{ t('etapas', lang) }}</th><th>{{ t('status', lang) }}</th></tr></thead>
+    <tbody>
+      {% for etapa in fase.etapas %}
+      <tr>
+        <td>{{ etapa.desc }}{% if etapa.script %} <code>{{ etapa.script }}</code>{% endif %}</td>
+        <td><span class="badge" style="background: {{ status_types[etapa.status_type].cor }}">
+          {{ status_types[etapa.status_type]['rotulo_' + lang] }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endfor %}
+{% endblock %}

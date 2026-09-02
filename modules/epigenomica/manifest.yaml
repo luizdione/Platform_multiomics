@@ -1,0 +1,48 @@
+# Módulo Epigenômica — manifest (Fase 3 do plano migra o pipeline de metilação da
+# epigenome_platform congelada e traz o painel 108 do OneDrive para dado versionado).
+id: epigenomica
+nome_pt: Epigenômica
+nome_en: Epigenomics
+icone: "🧭"
+ordem: 2
+descricao_pt: >-
+  Metilação comparativa (RRBS/WGBS) indicino × taurino: DMCs (methylKit), interseção
+  DMR × genes-alvo, perfis TSS, motifs (HOMER) e integração com SNPs (MOFA2).
+descricao_en: >-
+  Comparative methylation (RRBS/WGBS) indicine × taurine: DMCs (methylKit), DMR ×
+  target-gene intersection, TSS profiles, motifs (HOMER) and SNP integration (MOFA2).
+fases:
+  - id: epi_fase1
+    nome: Fase 1 · Metilação diferencial
+    descricao: Importação de coberturas, QC e DMCs (methylKit, |diff|>15%, q<0,05).
+    etapas:
+      - key: importar_coberturas
+        desc: Importação/QC de arquivos de cobertura RRBS/WGBS
+        auto: true
+        status_type: planejado
+      - key: dmcs_methylkit
+        desc: DMCs com methylKit no container omica-r-methyl (renv.lock)
+        auto: true
+        status_type: planejado
+  - id: epi_fase2
+    nome: Fase 2 · Interseção e anotação
+    descricao: DMR × painel de genes (108 genes, versionado com proveniência), perfis TSS, HOMER.
+    etapas:
+      - key: painel_108
+        desc: Painel 108 genes trazido do OneDrive para modules/epigenomica/data/paineis (contagem canônica)
+        auto: false
+        status_type: planejado
+      - key: intersecao_dmr
+        desc: Interseção DMR × genes-alvo (reuso do módulo Python puro da plataforma antiga)
+        auto: true
+        status_type: planejado
+      - key: perfis_tss
+        desc: Heatmaps de perfil TSS (numpy/matplotlib)
+        auto: true
+        status_type: planejado
+      - key: motifs_homer
+        desc: Motifs de TF nas DMRs (HOMER, container omica-homer)
+        auto: true
+        status_type: planejado
+scripts: []
+results_spec: {}

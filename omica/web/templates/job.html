@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ job.job_id }}{% endblock %}
+{% block conteudo %}
+<a class="voltar" href="/jobs?lang={{ lang }}">{{ t('voltar', lang) }}</a>
+<h1>{{ t('job', lang) }} <code>{{ job.job_id }}</code></h1>
+<p id="status-badge">
+  <span class="badge job-{{ job.status }}">{{ t('status_' + job.status, lang) }}</span>
+  · {{ t('atualizado', lang) }}: {{ job.updated }}
+</p>
+
+<h2>{{ t('console', lang) }}</h2>
+<pre id="console" class="console" data-job="{{ job.job_id }}" data-encerrado="{{ '1' if job.status in ('done', 'error') else '0' }}"></pre>
+
+<h2>{{ t('resultado', lang) }}</h2>
+{% if resultado %}
+<table>
+  <tbody>
+    {% for chave, valor in resultado.items() %}
+    <tr><th>{{ chave }}</th><td><code>{{ valor }}</code></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p id="sem-resultado">{{ t('sem_resultado', lang) }}</p>
+{% endif %}
+<script src="/static/omica.js"></script>
+{% endblock %}
