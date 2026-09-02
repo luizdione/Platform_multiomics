@@ -1,0 +1,36 @@
+# omica-bioinfo — worker científico da fila "bioinfo".
+# Herda a receita do Dockerfile da genomes_platform (congelada) CORRIGINDO o bug
+# de case: o jar fica em /opt/snpEff (S maiúsculo) e é assim que os scripts o
+# chamam. O banco SnpEff custom (ARS-UCD1.3.113) fica FORA da imagem, em
+# E:\data\snpeff_data → montado como /data/snpeff_data.
+# Este container É o executor: as ferramentas ficam no PATH do próprio worker
+# (fila por runtime, sem docker.sock — anti-lição nº 11).
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    OMICA_IN_DOCKER=1 \
+    PYTHONPATH=/app
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    openjdk-21-jre-headless \
+    samtools bcftools tabix \
+    wget unzip ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# SnpEff (mesma fonte do legado); jar em /opt/snpEff/snpEff.jar
+RUN wget -q https://snpeff-public.s3.amazonaws.com/versions/snpEff_latest_core.zip \
+    && unzip -q snpEff_latest_core.zip -d /opt/ \
+    && rm snpEff_latest_core.zip
+
+ENV SNPEFF_JAR="/opt/snpEff/snpEff.jar"
+
+# Só o necessário para consumir a fila RQ (pins iguais ao requirements.txt);
+# o pacote omica chega montado em /app (PYTHONPATH).
+RUN pip3 install --no-cache-dir --break-system-packages \
+    rq==1.16.2 redis==5.2.1 psutil==6.1.0 PyYAML==6.0.2 pydantic==2.10.3 \
+    pytest==8.3.4
+
+WORKDIR /app
+CMD ["rq", "worker", "bioinfo", "--url", "redis://omica-redis:6379/0"]

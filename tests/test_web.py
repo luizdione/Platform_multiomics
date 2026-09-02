@@ -66,6 +66,20 @@ def test_job_demo_ponta_a_ponta(cfg):
     assert "soma_verificacao" in pagina.text
 
 
+def test_pagina_modulo_lista_scripts_e_resultados_vazios(cfg):
+    r = _client().get("/modulos/genomica")
+    assert "Extração por painel (demo BTA14)" in r.text
+    assert "▶ Rodar" in r.text
+    # sem arquivos de resultado ainda → a UI diz "sem dados", nunca inventa
+    assert "nunca inventa número" in r.text
+
+
+def test_script_bioinfo_sem_redis_mostra_aviso(cfg):
+    r = _client().post("/modulos/genomica/scripts/extracao_demo", follow_redirects=False)
+    assert r.status_code == 303
+    assert "aviso=" in r.headers["location"]
+
+
 def test_ajuda_renderiza_markdown():
     r = _client().get("/ajuda/01_visao_geral.md")
     assert r.status_code == 200

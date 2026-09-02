@@ -20,9 +20,9 @@ from fastapi.templating import Jinja2Templates
 
 from omica import __version__
 from omica.config import REPO_ROOT, get_config
-from omica.jobs import guarda_ram, queue
+from omica.jobs import dispatch, guarda_ram, queue
 from omica.registry import STATUS_TYPES, load_registry
-from omica.results import resultado_de_job
+from omica.results import carregar_tabela, resultado_de_job, resultado_do_modulo
 from omica.web.i18n import normalizar_lang, t
 
 WEB_DIR = Path(__file__).resolve().parent
@@ -57,7 +57,25 @@ def modulo(request: Request, mod_id: str):
     m = reg.por_id(mod_id)
     if m is None:
         return RedirectResponse("/", status_code=303)
-    return _render(request, "modulo.html", m=m)
+    # results_spec → conteúdo lido AGORA do disco (nunca número em template)
+    resultados = []
+    for rotulo, rel in m.results_spec.items():
+        if rel.endswith(".json"):
+            resultados.append((rotulo, "json", resultado_do_modulo(rel)))
+        else:
+            resultados.append((rotulo, "tabela", carregar_tabela(rel)))
+    return _render(request, "modulo.html", m=m,
+                   resultados=resultados, aviso=request.query_params.get("aviso"))
+
+
+@app.post("/modulos/{mod_id}/scripts/{script_key}")
+def rodar_script(request: Request, mod_id: str, script_key: str):
+    try:
+        job_id, backend = dispatch.lancar_script(mod_id, script_key)
+    except (guarda_ram.RecusadoPorRAM, queue.FilaIndisponivel,
+            dispatch.RuntimeIndisponivel, KeyError) as e:
+        return RedirectResponse(f"/modulos/{mod_id}?aviso={e}", status_code=303)
+    return RedirectResponse(f"/jobs/{job_id}?backend={backend}", status_code=303)
 
 
 @app.get("/jobs", response_class=HTMLResponse)

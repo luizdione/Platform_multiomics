@@ -52,6 +52,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "status_running": {"pt": "Rodando", "en": "Running"},
     "status_done": {"pt": "Concluído", "en": "Done"},
     "status_error": {"pt": "Erro", "en": "Error"},
+    "scripts_modulo": {"pt": "Análises deste módulo", "en": "Module analyses"},
+    "resultados_modulo": {"pt": "Resultados (lidos do disco agora)", "en": "Results (read from disk now)"},
+    "rodar": {"pt": "▶ Rodar", "en": "▶ Run"},
+    "exibindo": {"pt": "Exibindo", "en": "Showing"},
     "rodape": {
         "pt": "Plataforma local (zero nuvem, zero LLM no caminho crítico). Dados pesados em E:\\data\\omica.",
         "en": "Local platform (no cloud, no LLM in the critical path). Heavy data on E:\\data\\omica.",

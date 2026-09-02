@@ -70,9 +70,14 @@ def test_runtime_invalido_e_rejeitado():
         )
 
 
-def test_modulos_fase1_estao_em_construcao():
-    # Honestidade da Fase 1: nenhum módulo finge estar pronto.
+def test_honestidade_dos_status():
+    # Módulos ainda não migrados ficam "em construção"; a genômica (Fase 2 em
+    # curso) já tem scripts declarados e etapas fora de "planejado".
     reg = load_registry(MODULES_DIR)
-    for mod_id in ESPERADOS:
+    for mod_id in ("epigenomica", "transcriptomica"):
         m = reg.por_id(mod_id)
-        assert m is not None and m.em_construcao()
+        assert m is not None and m.em_construcao() and not m.scripts
+    gen = reg.por_id("genomica")
+    assert gen is not None and not gen.em_construcao()
+    assert {s.key for s in gen.scripts} == {"extracao_demo", "frequencias_demo", "anotacao_demo"}
+    assert gen.results_spec  # UI só mostra número lido de arquivo

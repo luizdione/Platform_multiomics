@@ -4,6 +4,7 @@
 <a class="voltar" href="/?lang={{ lang }}">{{ t('voltar', lang) }}</a>
 <h1>{{ m.icone }} {{ m.nome_pt if lang == 'pt' else m.nome_en }}</h1>
 <p>{{ m.descricao_pt if lang == 'pt' else m.descricao_en }}</p>
+{% if aviso %}<p class="alerta">⚠️ {{ aviso }}</p>{% endif %}
 
 {% for fase in m.fases %}
 <section class="fase">
@@ -23,4 +24,51 @@
   </table>
 </section>
 {% endfor %}
+
+{% if m.scripts %}
+<h2>{{ t('scripts_modulo', lang) }}</h2>
+<section class="cards">
+  {% for spec in m.scripts %}
+  <div class="card">
+    <h3>{{ spec.titulo }}</h3>
+    <p>{{ spec.descricao }}</p>
+    <p class="meta">
+      <code>{{ spec.runtime }}</code> · {{ spec.mem_gb }} GB ·
+      {{ spec.tempo_estimado or '—' }}
+    </p>
+    <form method="post" action="/modulos/{{ m.id }}/scripts/{{ spec.key }}">
+      <button type="submit">{{ t('rodar', lang) }}</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if m.results_spec %}
+<h2>{{ t('resultados_modulo', lang) }}</h2>
+{% for rotulo, tipo, dados in resultados %}
+<section class="fase">
+  <h3>{{ rotulo }}</h3>
+  {% if dados is none %}
+    <p>{{ t('sem_resultado', lang) }}</p>
+  {% elif tipo == 'json' %}
+    <table><tbody>
+      {% for chave, valor in dados.items() %}
+      <tr><th>{{ chave }}</th><td><code>{{ valor }}</code></td></tr>
+      {% endfor %}
+    </tbody></table>
+  {% else %}
+    <table>
+      <thead><tr>{% for c in dados.colunas %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for linha in dados.linhas %}
+        <tr>{% for v in linha %}<td>{{ v }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="meta">{{ t('exibindo', lang) }} {{ dados.exibidas }} / {{ dados.total_linhas }}</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endif %}
 {% endblock %}

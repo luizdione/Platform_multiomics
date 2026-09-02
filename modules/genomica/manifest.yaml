@@ -1,6 +1,8 @@
-# Módulo Genômica — manifest (Fase 2 do plano migra os scripts vivos da
-# genomes_platform congelada; até lá, etapas ficam "planejado" e a UI mostra
-# o módulo como em construção — nunca módulo morto fingindo funcionar).
+# Módulo Genômica — manifest (Fase 2 em migração curada da genomes_platform
+# congelada). Scripts rodam na fila "bioinfo" (worker = imagem omica-bioinfo,
+# sem docker.sock). Demo: fatia REAL do 1000 Bull Genomes Run 8 versionada em
+# demo_data/ (BTA14:1-2.500.000, 122.372 variantes, sem genótipos — AF/AC/AN
+# no INFO). Nenhum número científico vive aqui: a UI lê results_spec.
 id: genomica
 nome_pt: Genômica
 nome_en: Genomics
@@ -23,24 +25,71 @@ fases:
         auto: true
         status_type: planejado
       - key: integridade_vcf
-        desc: "Integridade e índices .tbi dos VCFs em E:\\data\\1000bg_vcf (legado: check_vcf_integrity.py)"
+        desc: "Integridade e índices dos VCFs/BCFs em E:\\data\\1000bg_vcf (legado: check_vcf_integrity.py)"
         auto: true
         status_type: planejado
   - id: gen_fase2
-    nome: Fase 2 · Extração e anotação
-    descricao: Extração por região (bcftools -R), anotação SnpEff (db custom ARS-UCD1.3) e VEP.
+    nome: Fase 2 · Extração, anotação e frequências
+    descricao: Extração por painel (bcftools -R), anotação SnpEff (ARS-UCD1.3.113) e frequências AF/MAF.
     etapas:
       - key: extracao_regioes
-        desc: Extração de variantes por painel de genes (bcftools via imagem omica-bioinfo)
+        desc: Extração de variantes por painel BED (bcftools na imagem omica-bioinfo)
         auto: true
-        status_type: planejado
+        status_type: concluido
       - key: anotacao_snpeff
-        desc: Anotação funcional SnpEff (corrigindo o bug /opt/snpEff da plataforma antiga)
+        desc: Anotação funcional SnpEff — banco ARS-UCD1.3.113 em E:\data\snpeff_data (bug /opt/snpEff corrigido)
         auto: true
-        status_type: planejado
+        status_type: concluido
       - key: frequencias
-        desc: MAF/Fst/HWE por raça (plink2)
+        desc: Frequências alélicas AF/MAF via INFO (plink2/Fst por raça entram na sequência da Fase 2)
         auto: true
-        status_type: planejado
-scripts: []
-results_spec: {}
+        status_type: concluido
+scripts:
+  - key: extracao_demo
+    titulo: "Extração por painel (demo BTA14)"
+    descricao: >-
+      Extrai as variantes das 3 janelas do painel demo (inclui a janela do DGAT1)
+      a partir da fatia real do 1000 Bull Genomes versionada no repo.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/extracao_regioes.py
+      --entrada modules/genomica/demo_data/demo_bta14_inicio.vcf.gz
+      --bed modules/genomica/demo_data/painel_demo.bed
+      --saida {dados}/results/genomica/demo/extracao
+    inputs: ["modules/genomica/demo_data/demo_bta14_inicio.vcf.gz", "modules/genomica/demo_data/painel_demo.bed"]
+    outputs: ["results/genomica/demo/extracao/extraido.vcf.gz", "results/genomica/demo/extracao/extracao_resumo.json"]
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~10 s"
+  - key: frequencias_demo
+    titulo: "Frequências alélicas (demo)"
+    descricao: Tabela AF/MAF das variantes extraídas, ordenada por MAF (INFO AF do Run 8).
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/frequencias.py
+      --entrada {dados}/results/genomica/demo/extracao/extraido.vcf.gz
+      --saida {dados}/results/genomica/demo/frequencias
+    inputs: ["results/genomica/demo/extracao/extraido.vcf.gz"]
+    outputs: ["results/genomica/demo/frequencias/frequencias.tsv", "results/genomica/demo/frequencias/frequencias_resumo.json"]
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~10 s"
+  - key: anotacao_demo
+    titulo: "Anotação SnpEff (demo)"
+    descricao: Anota as variantes extraídas com o banco custom ARS-UCD1.3.113 e conta efeitos.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/anotacao_snpeff.py
+      --entrada {dados}/results/genomica/demo/extracao/extraido.vcf.gz
+      --saida {dados}/results/genomica/demo/anotacao
+    inputs: ["results/genomica/demo/extracao/extraido.vcf.gz", "E:\\data\\snpeff_data\\ARS-UCD1.3.113"]
+    outputs: ["results/genomica/demo/anotacao/anotado.vcf.gz", "results/genomica/demo/anotacao/efeitos.tsv"]
+    mem_gb: 5
+    cpus: 2
+    tempo_estimado: "1–3 min"
+results_spec:
+  "Extração (resumo)": "genomica/demo/extracao/extracao_resumo.json"
+  "Frequências (resumo)": "genomica/demo/frequencias/frequencias_resumo.json"
+  "Frequências (top MAF)": "genomica/demo/frequencias/frequencias.tsv"
+  "Anotação (resumo)": "genomica/demo/anotacao/anotacao_resumo.json"
+  "Anotação (efeitos)": "genomica/demo/anotacao/efeitos.tsv"

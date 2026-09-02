@@ -2,6 +2,34 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [0.2.0] — 2026-09-02 · Fase 2 (genômica — núcleo)
+
+### Adicionado
+- **Execução científica sem docker.sock** (anti-lição nº 11): fila RQ por runtime —
+  `image:omica-bioinfo` → fila `bioinfo`, consumida pelo serviço `worker-bioinfo`
+  cujo container É a imagem de ferramentas (`omica/jobs/dispatch.py`,
+  `script_job.py`; `queue.enqueue` ganhou `fila` e recusa fila especializada sem
+  Redis com mensagem acionável).
+- Imagem **omica-bioinfo** (`docker/Dockerfile.bioinfo`): herda a receita da
+  genomes_platform (Java 21 + samtools/bcftools/tabix + SnpEff) corrigindo o bug
+  de case `/opt/snpEff`; banco custom fica fora da imagem (`E:\data\snpeff_data`).
+- Módulo genômica com 3 análises reais (migração curada): extração por painel BED,
+  frequências AF/MAF (INFO do Run 8) e anotação SnpEff ARS-UCD1.3.113 — com
+  registro do genome via `-configOption` (o endpoint legado nunca rodou: o config
+  não tinha a entrada, verificado em 2026-09-02).
+- **Demo real versionado**: fatia do 1000 Bull Genomes Run 8 (BTA14:1–2,5 Mb,
+  122.372 variantes, sem genótipos, 6,8 MB) + painel BED de 3 janelas (inclui a
+  janela do DGAT1).
+- UI do módulo: cards de análises com ▶ Rodar (runtime/memória/tempo) e seção
+  **Resultados lidos do disco agora** (JSON → tabela chave/valor; TSV → primeiras
+  linhas via `results.carregar_tabela`).
+- Smoke tests (`pytest -m smoke tests/test_scripts_smoke.py` no container
+  bioinfo): extração+frequências e anotação SnpEff sobre o demo — 2/2 verdes.
+
+### Corrigido
+- Aceite ponta a ponta validado pela fila real: extração (52.881 variantes nas 3
+  janelas) → frequências → anotação (41 efeitos distintos) via POST na UI.
+
 ## [0.1.0] — 2026-09-02 · Fase 1 (esqueleto + casca)
 
 ### Adicionado

@@ -36,3 +36,25 @@ def resultado_de_job(job_id: str) -> Optional[dict[str, Any]]:
 def resultado_do_modulo(chave_relativa: str) -> Optional[dict[str, Any]]:
     """Carrega um resultado declarado em results_spec (relativo a results_dir)."""
     return carregar_json(get_config().results_dir / chave_relativa)
+
+
+def carregar_tabela(chave_relativa: str, max_linhas: int = 15) -> Optional[dict[str, Any]]:
+    """Carrega as primeiras linhas de um TSV/CSV de resultados (relativo a
+    results_dir) para exibição — nunca o arquivo inteiro no navegador."""
+    caminho = get_config().results_dir / chave_relativa
+    if not caminho.exists():
+        return None
+    sep = "\t" if caminho.suffix.lower() in (".tsv", ".txt") else ","
+    try:
+        with caminho.open("r", encoding="utf-8") as f:
+            colunas = f.readline().rstrip("\n").split(sep)
+            linhas = []
+            total = 0
+            for linha in f:
+                total += 1
+                if len(linhas) < max_linhas:
+                    linhas.append(linha.rstrip("\n").split(sep))
+    except OSError:
+        return None
+    return {"colunas": colunas, "linhas": linhas, "total_linhas": total,
+            "exibidas": len(linhas), "arquivo": str(caminho)}

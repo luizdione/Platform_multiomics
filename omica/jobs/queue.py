@@ -24,7 +24,12 @@ from typing import Any, Optional
 from omica.config import get_config
 from omica.jobs import guarda_ram
 
-FILA = "omica"
+FILA_DEFAULT = "omica"
+
+
+class FilaIndisponivel(RuntimeError):
+    """Fila especializada pedida sem Redis alcançável — não há fallback seguro:
+    a thread local roda no container web, que NÃO tem as ferramentas bioinfo."""
 
 
 def _job_dir(job_id: str) -> Path:
@@ -91,7 +96,7 @@ def executar_por_caminho(func_path: str, job_id: str) -> None:
         raise
 
 
-def _rq_queue():
+def _rq_queue(fila: str = FILA_DEFAULT):
     url = get_config().redis_url
     if not url:
         return None
@@ -101,21 +106,28 @@ def _rq_queue():
 
         conexao = Redis.from_url(url, socket_connect_timeout=2)
         conexao.ping()
-        return Queue(FILA, connection=conexao)
+        return Queue(fila, connection=conexao)
     except Exception:
         return None
 
 
 def enqueue(func_path: str, prefixo: str, mem_gb: float = 0.5,
-            timeout_s: int = 3600, **meta: Any) -> tuple[str, str]:
+            timeout_s: int = 3600, fila: str = FILA_DEFAULT, **meta: Any) -> tuple[str, str]:
     """Enfileira (RQ) ou dispara (thread) um job. Retorna (job_id, backend).
 
-    Levanta guarda_ram.RecusadoPorRAM se não couber no orçamento de RAM.
+    Levanta guarda_ram.RecusadoPorRAM se não couber no orçamento de RAM, e
+    FilaIndisponivel se uma fila especializada (ex.: bioinfo) for pedida sem
+    Redis — o fallback de thread só vale para a fila default.
     """
     guarda_ram.autorizar(mem_gb)
+    q = _rq_queue(fila)
+    if q is None and fila != FILA_DEFAULT:
+        raise FilaIndisponivel(
+            f"fila {fila!r} exige Redis + worker dedicado (docker compose up); "
+            "sem Redis só a fila default roda em thread local."
+        )
     job_id = novo_job_id(prefixo)
-    write_status(job_id, "queued", mem_gb=mem_gb, func=func_path, **meta)
-    q = _rq_queue()
+    write_status(job_id, "queued", mem_gb=mem_gb, func=func_path, fila=fila, **meta)
     if q is not None:
         q.enqueue(executar_por_caminho, func_path, job_id, job_timeout=timeout_s)
         return job_id, "rq"
