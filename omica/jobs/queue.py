@@ -143,6 +143,96 @@ def _thread_segura(func_path: str, job_id: str) -> None:
         pass  # status/log já registrados por executar_por_caminho
 
 
+def enqueue_cadeia(itens: list[dict[str, Any]], wf_meta: dict[str, Any]) -> tuple[str, list[str], str]:
+    """Enfileira uma CADEIA de jobs em que cada um depende do anterior.
+
+    itens: [{func_path, prefixo, mem_gb, fila, timeout_s, meta:{...}}, ...]
+    Backend RQ: usa depends_on (o passo N só roda se o N-1 terminar OK).
+    Fallback thread (só fila default): executa sequencial numa única thread e
+    interrompe na primeira falha, marcando os passos restantes como error.
+    Guarda de RAM: autoriza pelo PICO (max de mem_gb) — os passos são
+    sequenciais, nunca simultâneos (a soma no orçamento fica conservadora).
+
+    Retorna (wf_run_id, [job_ids], backend) e grava o run em
+    <work_dir>/workflows/<wf_run_id>.json.
+    """
+    cfg = get_config()
+    guarda_ram.autorizar(max(i.get("mem_gb", 0.5) for i in itens))
+    filas = {i.get("fila", FILA_DEFAULT) for i in itens}
+    precisa_rq = filas != {FILA_DEFAULT}
+    q_teste = _rq_queue(next(iter(filas)))
+    if q_teste is None and precisa_rq:
+        raise FilaIndisponivel(
+            "workflow usa filas especializadas e exige Redis + workers dedicados "
+            "(docker compose up)."
+        )
+    wf_run_id = novo_job_id(wf_meta.get("prefixo", "wf"))
+    job_ids: list[str] = []
+    for item in itens:
+        jid = novo_job_id(item["prefixo"])
+        job_ids.append(jid)
+        write_status(jid, "queued", mem_gb=item.get("mem_gb", 0.5),
+                     func=item["func_path"], fila=item.get("fila", FILA_DEFAULT),
+                     wf_run_id=wf_run_id, **item.get("meta", {}))
+
+    backend = "thread"
+    if q_teste is not None:
+        backend = "rq"
+        anterior = None
+        for item, jid in zip(itens, job_ids):
+            q = _rq_queue(item.get("fila", FILA_DEFAULT))
+            anterior = q.enqueue(
+                executar_por_caminho, item["func_path"], jid,
+                job_timeout=item.get("timeout_s", 3600), depends_on=anterior,
+            )
+    else:
+        def _sequencial() -> None:
+            falhou = False
+            for item, jid in zip(itens, job_ids):
+                if falhou:
+                    write_status(jid, "error", error="passo anterior da cadeia falhou")
+                    continue
+                try:
+                    executar_por_caminho(item["func_path"], jid)
+                except Exception:
+                    falhou = True
+
+        threading.Thread(target=_sequencial, daemon=True).start()
+
+    registro = cfg.work_dir / "workflows"
+    registro.mkdir(parents=True, exist_ok=True)
+    (registro / f"{wf_run_id}.json").write_text(
+        json.dumps({"wf_run_id": wf_run_id, "backend": backend,
+                    "criado": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "jobs": job_ids, **wf_meta}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return wf_run_id, job_ids, backend
+
+
+def ler_workflow_run(wf_run_id: str) -> Optional[dict[str, Any]]:
+    caminho = get_config().work_dir / "workflows" / f"{wf_run_id}.json"
+    if not caminho.exists():
+        return None
+    try:
+        run = json.loads(caminho.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    passos = [read_status(j) or {"job_id": j, "status": "queued"} for j in run["jobs"]]
+    estados = [p["status"] for p in passos]
+    if "error" in estados:
+        agregado = "error"
+    elif all(e == "done" for e in estados):
+        agregado = "done"
+    elif "running" in estados or "done" in estados:
+        agregado = "running"
+    else:
+        agregado = "queued"
+    run["passos"] = passos
+    run["status"] = agregado
+    return run
+
+
 def listar_jobs(limite: int = 50) -> list[dict[str, Any]]:
     cfg = get_config()
     if not cfg.jobs_dir.exists():

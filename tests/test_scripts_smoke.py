@@ -61,6 +61,50 @@ def test_smoke_extracao_e_frequencias(tmp_path):
 
 
 @pytest.mark.smoke
+@pytest.mark.skipif(not Path("/data/snpeff_data/ARS-UCD1.3.113/genes.gtf.gz").exists(),
+                    reason="GTF local ausente (rodar no container bioinfo com E:\\data)")
+def test_smoke_coordenadas_painel(tmp_path):
+    _rodar("coordenadas_painel.py",
+           "--painel", "modules/genomica/data/paineis/termotolerancia.txt",
+           "--saida", str(tmp_path))
+    resumo = json.loads((tmp_path / "termotolerancia_resumo.json").read_text(encoding="utf-8"))
+    assert resumo["n_simbolos"] == 14
+    assert resumo["n_localizados"] >= 12  # nomes de símbolo podem variar no GTF
+    bed = (tmp_path / "termotolerancia.bed").read_text(encoding="utf-8").splitlines()
+    assert len(bed) == resumo["n_localizados"]
+    assert "DGAT1" in {l.split("\t")[3] for l in bed}
+
+
+@pytest.mark.smoke
+@precisa_bcftools
+@pytest.mark.skipif(not Path("/data/1000bg_vcf").exists(),
+                    reason="E:\\data\\1000bg_vcf ausente")
+def test_smoke_integridade_vcf(tmp_path):
+    _rodar("integridade_vcf.py", "--dir", "/data/1000bg_vcf", "--saida", str(tmp_path))
+    resumo = json.loads((tmp_path / "integridade_resumo.json").read_text(encoding="utf-8"))
+    assert resumo["n_arquivos"] > 0
+    assert resumo["n_ok"] + resumo["n_problemas"] == resumo["n_arquivos"]
+
+
+@pytest.mark.smoke
+@precisa_bcftools
+@pytest.mark.skipif(shutil.which("plink2") is None
+                    or not Path("/data/1000bg_metadata/samples_angus.txt").exists(),
+                    reason="plink2 ou listas de raça ausentes (container bioinfo + E:\\data)")
+def test_smoke_fst_racas(tmp_path):
+    _rodar("fst_racas.py",
+           "--vcf", "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf",
+           "--regiao", "14:400000-700000",
+           "--grupo-a", "Angus=/data/1000bg_metadata/samples_angus.txt",
+           "--grupo-b", "Nelore=/data/1000bg_metadata/samples_nelore.txt",
+           "--saida", str(tmp_path))
+    resumo = json.loads((tmp_path / "fst_resumo.json").read_text(encoding="utf-8"))
+    assert resumo["grupo_a"]["n_amostras"] >= 2 and resumo["grupo_b"]["n_amostras"] >= 2
+    assert resumo["n_variantes"] > 100
+    assert resumo["fst_global"] is not None and 0.0 <= resumo["fst_global"] <= 1.0
+
+
+@pytest.mark.smoke
 @precisa_bcftools
 @precisa_snpeff
 def test_smoke_anotacao_snpeff(tmp_path):

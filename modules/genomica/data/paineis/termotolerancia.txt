@@ -1,0 +1,18 @@
+# Painel exemplo: termotolerância e adaptação bovina (símbolos reais usados nos
+# papers do autor — 5 genes-ponte do sub04 + core regulatório do sub01 + clássicos).
+# Coordenadas NÃO vivem aqui: são resolvidas pelo script coordenadas_painel.py
+# contra o GTF local (ARS-UCD1.3) na hora da execução.
+DGAT1
+PRLR
+GHR
+HSF1
+HSPA1A
+HSPB8
+MSTN
+GNAS
+MX1
+IGF1
+GH1
+ABCG2
+CYP11A1
+RSAD2

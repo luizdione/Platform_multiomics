@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — Professor Ômico{% endblock %}
+{% block conteudo %}
+<h1>🎓 {{ t('professor_titulo', lang) }}</h1>
+<p>{{ t('professor_sub', lang) }}</p>
+<p class="meta">
+  {% if motor_ok %}
+    🟢 {{ t('motor_ok', lang) }} — <code>{{ modelo }}</code> (Ollama local / LILO)
+  {% else %}
+    🔴 {{ t('motor_off', lang) }} — <code>ollama serve</code>
+  {% endif %}
+</p>
+
+<section class="fase">
+  <form method="post" action="/professor/perguntar">
+    <p><label>{{ t('professor_pergunta', lang) }}<br>
+      <textarea name="frase" rows="3" style="width:100%" placeholder="{{ t('professor_placeholder', lang) }}">{{ frase }}</textarea>
+    </label></p>
+    <p><label>{{ t('professor_arquivo', lang) }}<br>
+      <input type="text" name="arquivo" style="width:100%" value="{{ arquivo }}" placeholder="E:\data\...\meu.vcf.gz ({{ t('opcional', lang) }})">
+    </label></p>
+    <button type="submit" {% if not motor_ok %}disabled{% endif %}>{{ t('professor_perguntar', lang) }}</button>
+  </form>
+</section>
+
+{% if resposta %}
+<section class="fase">
+  <h2>{{ t('professor_plano', lang) }}</h2>
+  {% if resposta.status == 'ok' %}
+    {% set plano = resposta.plano %}
+    <p class="alerta" style="background:#e6fffa;border-color:#0f766e">🧭 {{ plano.explicacao }}</p>
+    {% if plano.acao == 'rodar_workflow' %}
+      <form method="post" action="/modulos/{{ plano.modulo }}/workflows/{{ plano.alvo }}">
+        <button type="submit">✅ {{ t('professor_executar', lang) }}: workflow <code>{{ plano.alvo }}</code> ({{ plano.modulo }})</button>
+      </form>
+    {% elif plano.acao == 'rodar_script' %}
+      <form method="post" action="/modulos/{{ plano.modulo }}/scripts/{{ plano.alvo }}">
+        <button type="submit">✅ {{ t('professor_executar', lang) }}: <code>{{ plano.alvo }}</code> ({{ plano.modulo }})</button>
+      </form>
+    {% endif %}
+    <p class="meta">{{ t('professor_confianca', lang) }} · {{ t('modelo', lang) }}: <code>{{ resposta.modelo }}</code></p>
+  {% elif resposta.status == 'plano_invalido' %}
+    <p class="alerta">⚠️ {{ t('professor_invalido', lang) }}: {{ resposta.detalhe }}</p>
+    {% if resposta.explicacao %}<p>{{ resposta.explicacao }}</p>{% endif %}
+  {% else %}
+    <p class="alerta">⚠️ {{ resposta.detalhe }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<h2>{{ t('professor_vitrine', lang) }}</h2>
+<section class="cards">
+  {% for item in vitrine %}
+  <div class="card">
+    <h3>{{ item.icone }} {{ item.wf.titulo }}</h3>
+    <p>{{ item.wf.descricao }}</p>
+    <p class="meta">
+      {{ item.modulo_nome }} · {{ item.wf.passos | length }} {{ t('passos', lang) }}:
+      {% for p in item.wf.passos %}<code>{{ p }}</code>{% if not loop.last %} → {% endif %}{% endfor %}
+    </p>
+    <p class="meta">✅ {{ t('testado_em', lang) }} {{ item.wf.testado_em }}{% if item.wf.testado_por %} — {{ item.wf.testado_por }}{% endif %}</p>
+    {% if item.wf.nota_didatica %}<p class="meta">📘 {{ item.wf.nota_didatica }}</p>{% endif %}
+    <form method="post" action="/modulos/{{ item.modulo }}/workflows/{{ item.wf.id }}">
+      <button type="submit">{{ t('rodar', lang) }} workflow</button>
+    </form>
+  </div>
+  {% else %}
+  <p>{{ t('professor_sem_testados', lang) }}</p>
+  {% endfor %}
+</section>
+{% endblock %}

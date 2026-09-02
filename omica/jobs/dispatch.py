@@ -7,6 +7,7 @@ Nada de docker-dentro-de-docker fora do futuro profile nfcore.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from omica.config import get_config
@@ -53,23 +54,37 @@ def fila_para_runtime(runtime: str) -> str:
     raise RuntimeIndisponivel(f"runtime desconhecido: {runtime!r}")
 
 
-def montar_cmd(spec: ScriptSpec) -> str:
-    """Substitui os placeholders do manifest. {dados} = OMICA_DATA (raiz dos
-    dados pesados); caminhos relativos no cmd são relativos à raiz do repo."""
+_PARAM_SEGURO = re.compile(r"^[A-Za-z0-9_\-./\\:= ]+$")  # '=' p/ convenção Nome=arquivo
+
+
+def montar_cmd(spec: ScriptSpec, valores: Optional[dict[str, str]] = None) -> str:
+    """Substitui os placeholders do manifest. {dados} = OMICA_DATA; os demais
+    vêm dos params declarados no spec (default < valor do formulário), sempre
+    sanitizados — o usuário preenche VALORES, nunca shell."""
     cfg = get_config()
-    return spec.cmd.format(dados=str(cfg.data_dir))
+    contexto: dict[str, str] = {"dados": str(cfg.data_dir)}
+    valores = valores or {}
+    for param in spec.params:
+        bruto = (valores.get(param.name) or param.default).strip()
+        if not bruto:
+            raise ValueError(f"parâmetro obrigatório vazio: {param.rotulo} ({param.name})")
+        if ".." in bruto or not _PARAM_SEGURO.match(bruto):
+            raise ValueError(f"valor inválido para {param.rotulo}: {bruto!r}")
+        contexto[param.name] = bruto
+    return spec.cmd.format(**contexto)
 
 
 def lancar_script(mod_id: str, script_key: str,
+                  valores: Optional[dict[str, str]] = None,
                   extra_meta: Optional[dict[str, Any]] = None) -> tuple[str, str]:
     """Enfileira um script de módulo. Retorna (job_id, backend).
 
     Levanta RecusadoPorRAM (guarda), FilaIndisponivel (fila especializada sem
-    Redis) ou RuntimeIndisponivel (runtime de fase futura).
+    Redis), RuntimeIndisponivel (runtime de fase futura) ou ValueError (param).
     """
     m, spec = _resolver(mod_id, script_key)
     fila = fila_para_runtime(spec.runtime)
-    cmd = montar_cmd(spec)
+    cmd = montar_cmd(spec, valores)
     return queue.enqueue(
         "omica.jobs.script_job.executar",
         prefixo=f"{mod_id}-{script_key}",
@@ -83,3 +98,32 @@ def lancar_script(mod_id: str, script_key: str,
         runtime=spec.runtime,
         **(extra_meta or {}),
     )
+
+
+def lancar_workflow(mod_id: str, wf_id: str) -> tuple[str, list[str], str]:
+    """Enfileira um workflow inteiro (passos encadeados por depends_on).
+
+    Retorna (wf_run_id, job_ids, backend)."""
+    reg = load_registry()
+    m = reg.por_id(mod_id)
+    if m is None:
+        raise KeyError(f"módulo desconhecido: {mod_id}")
+    wf = next((w for w in m.workflows if w.id == wf_id), None)
+    if wf is None:
+        raise KeyError(f"workflow desconhecido: {mod_id}/{wf_id}")
+    itens = []
+    for passo in wf.passos:
+        _, spec = _resolver(mod_id, passo)
+        itens.append({
+            "func_path": "omica.jobs.script_job.executar",
+            "prefixo": f"{mod_id}-{passo}",
+            "mem_gb": spec.mem_gb,
+            "fila": fila_para_runtime(spec.runtime),
+            "timeout_s": 6 * 3600,
+            "meta": {"cmd": montar_cmd(spec), "modulo": mod_id, "script": passo,
+                     "titulo": spec.titulo, "runtime": spec.runtime},
+        })
+    return queue.enqueue_cadeia(itens, wf_meta={
+        "prefixo": f"wf-{mod_id}-{wf_id}", "modulo": mod_id,
+        "workflow": wf_id, "titulo": wf.titulo,
+    })

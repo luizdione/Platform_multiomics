@@ -2,6 +2,46 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [0.3.0] — 2026-09-02 · Workflows encadeados + Professor Ômico + Fase 2 (restante)
+
+### Adicionado — motor de workflows (determinístico, zero LLM)
+- `workflows:` no manifest (`WorkflowSpec`): passos são scripts do módulo e a
+  validação de boot EXIGE encadeamento real (todo passo N>1 consome output de
+  passo anterior; manifest solto é rejeitado). Selo `testado_em`/`testado_por`
+  reservado a workflows validados de ponta a ponta de verdade.
+- Cadeia na fila: `enqueue_cadeia` usa `depends_on` do RQ (passo N só roda se o
+  N-1 concluir) com fallback sequencial em thread; run agregado em
+  `work/workflows/<id>.json` e página `/workflows/<id>` com auto-refresh.
+- `wf_painel_demo` selado (extração → frequências → anotação; testado 2026-09-02
+  pela fila real).
+
+### Adicionado — Professor Ômico (aba 🎓)
+- Agente didático LOCAL sobre o Ollama (motor do LILO; `OMICA_OLLAMA_URL/MODEL`,
+  default qwen3:14b): frase humana (+ arquivo opcional) → o modelo recebe o
+  CATÁLOGO dos manifests e devolve um plano JSON escolhendo DO catálogo; o plano
+  é validado contra o registry e só roda com o clique de Executar, pelas mesmas
+  rotas determinísticas. Sem Ollama, a aba segue útil (vitrine + instrução).
+- Vitrine "workflows prontos e testados nesta máquina" (só selados).
+
+### Adicionado — Fase 2 (restante)
+- **Params editáveis por script** (`ScriptSpec.params` → formulário na UI),
+  sanitizados no dispatch (charset estrito; sem shell no caminho).
+- `coordenadas_painel.py`: painel de símbolos → BED ±flanco via **GTF local do
+  SnpEff** — correção de fonte: o Ensembl REST atual serve ARS-UCD2.0
+  (verificado ao vivo), incompatível com os VCFs Run 8 (ARS-UCD1.2). Painel real
+  versionado: `data/paineis/termotolerancia.txt` (14 genes dos papers do autor).
+- `integridade_vcf.py`: saúde dos 31 VCFs/BCFs do 1000BG (índice/header/registro).
+- `fst_racas.py`: **Fst Hudson Angus(112)×Nelore(385) com plink2** sobre o BCF
+  real — validado: Fst global 0,283 em 122.372 variantes (BTA14:1–2,5 Mb).
+- plink2 na imagem omica-bioinfo; fluxograma SVG do módulo gerado do manifest
+  (`omica/web/flux.py`) — impossível divergir do registry.
+- VEP registrado como etapa `planejado` com motivo técnico (imagem/worker
+  dedicados + cache bovino ~2 GB) — entra na próxima leva.
+
+### Testes
+- 41 passed + 5 smoke no container bioinfo (coordenadas, integridade, Fst real,
+  extração+frequências, anotação SnpEff).
+
 ## [0.2.0] — 2026-09-02 · Fase 2 (genômica — núcleo)
 
 ### Adicionado

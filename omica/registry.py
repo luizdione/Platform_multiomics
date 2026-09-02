@@ -61,7 +61,8 @@ class ScriptSpec(BaseModel):
     titulo: str
     descricao: str = ""
     runtime: str            # "image:omica-bioinfo" | "conda:datascience" | "profile:nfcore"
-    cmd: str                # comando com templates {sub_id}, {input}, {output}
+    cmd: str                # comando com placeholders {dados} e {<param.name>}
+    params: list["ParamSpec"] = Field(default_factory=list)
     inputs: list[str] = Field(default_factory=list)
     outputs: list[str] = Field(default_factory=list)
     mem_gb: float = 1.0     # insumo da guarda de RAM
@@ -76,6 +77,28 @@ class ScriptSpec(BaseModel):
         return v
 
 
+class ParamSpec(BaseModel):
+    """Parâmetro editável de um script na UI. O valor preenche o placeholder
+    {name} do cmd (sanitizado no dispatch — nunca shell livre)."""
+    name: str
+    rotulo: str
+    default: str = ""
+
+
+class WorkflowSpec(BaseModel):
+    """Sequência de scripts do módulo em que o output de um passo alimenta o
+    input do seguinte. `testado_em`/`testado_por` só são preenchidos quando o
+    encadeamento rodou de ponta a ponta de verdade — é o selo da aba do
+    Professor Ômico (nunca marcar workflow não validado)."""
+    id: str
+    titulo: str
+    descricao: str = ""
+    passos: list[str]  # keys de scripts deste módulo, na ordem
+    testado_em: str = ""
+    testado_por: str = ""
+    nota_didatica: str = ""
+
+
 class Manifest(BaseModel):
     id: str
     nome_pt: str
@@ -86,6 +109,7 @@ class Manifest(BaseModel):
     descricao_en: str = ""
     fases: list[Fase] = Field(default_factory=list)
     scripts: list[ScriptSpec] = Field(default_factory=list)
+    workflows: list[WorkflowSpec] = Field(default_factory=list)
     # página → arquivo de resultado (relativo a results_dir). Único caminho para
     # números na UI (anti-lição nº 4: nada de número científico hardcoded).
     results_spec: dict[str, str] = Field(default_factory=dict)
@@ -140,3 +164,34 @@ def _validar_referencias(m: Manifest) -> None:
             faltando.append(f"script {spec.key} → {candidato.name}")
     if faltando:
         raise ValueError("referências quebradas: " + "; ".join(faltando))
+    _validar_workflows(m)
+
+
+def _validar_workflows(m: Manifest) -> None:
+    """Um workflow só é válido se cada passo N>1 consumir pelo menos um output
+    de passo anterior (encadeamento real, não lista solta) e se todos os passos
+    existirem em scripts. Inputs fora de results/ são insumos externos (dados
+    versionados ou E:\\data) e não contam para o encadeamento."""
+    specs = {s.key: s for s in m.scripts}
+    problemas: list[str] = []
+    for wf in m.workflows:
+        desconhecidos = [p for p in wf.passos if p not in specs]
+        if desconhecidos:
+            problemas.append(f"workflow {wf.id}: passos inexistentes {desconhecidos}")
+            continue
+        if len(wf.passos) < 2:
+            problemas.append(f"workflow {wf.id}: precisa de >=2 passos")
+            continue
+        acumulados: set[str] = set()
+        for i, passo in enumerate(wf.passos):
+            spec = specs[passo]
+            if i > 0:
+                internos = [x for x in spec.inputs if x.startswith("results/")]
+                if internos and not any(x in acumulados for x in internos):
+                    problemas.append(
+                        f"workflow {wf.id}: passo {passo} não consome nenhum output "
+                        f"dos passos anteriores (inputs {internos})"
+                    )
+            acumulados.update(spec.outputs)
+    if problemas:
+        raise ValueError("workflows inválidos: " + "; ".join(problemas))

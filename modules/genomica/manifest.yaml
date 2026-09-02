@@ -20,14 +20,14 @@ fases:
     descricao: Coordenadas de genes (Ensembl), metadados de amostras, integridade dos VCFs.
     compartilhada: true
     etapas:
-      - key: coordenadas_ensembl
-        desc: "Coordenadas dos genes-alvo via Ensembl REST (legado: buscar_allgenes_coordenadas_ensembl.py)"
+      - key: coordenadas_painel
+        desc: "Painel de símbolos → BED via GTF local do SnpEff (Ensembl REST hoje é ARS-UCD2.0, incompatível — fonte corrigida em 2026-09-02)"
         auto: true
-        status_type: planejado
+        status_type: concluido
       - key: integridade_vcf
         desc: "Integridade e índices dos VCFs/BCFs em E:\\data\\1000bg_vcf (legado: check_vcf_integrity.py)"
         auto: true
-        status_type: planejado
+        status_type: concluido
   - id: gen_fase2
     nome: Fase 2 · Extração, anotação e frequências
     descricao: Extração por painel (bcftools -R), anotação SnpEff (ARS-UCD1.3.113) e frequências AF/MAF.
@@ -41,9 +41,17 @@ fases:
         auto: true
         status_type: concluido
       - key: frequencias
-        desc: Frequências alélicas AF/MAF via INFO (plink2/Fst por raça entram na sequência da Fase 2)
+        desc: Frequências alélicas AF/MAF via INFO
         auto: true
         status_type: concluido
+      - key: fst_racas
+        desc: Fst Hudson entre raças (plink2) com as listas reais de BioSamples (Angus×Nelore)
+        auto: true
+        status_type: concluido
+      - key: vep
+        desc: "Anotação VEP (adiada: exige imagem/worker próprios + cache bovino ~2 GB — planejada com fila dedicada)"
+        auto: true
+        status_type: planejado
 scripts:
   - key: extracao_demo
     titulo: "Extração por painel (demo BTA14)"
@@ -87,9 +95,80 @@ scripts:
     mem_gb: 5
     cpus: 2
     tempo_estimado: "1–3 min"
+  - key: coordenadas_painel
+    titulo: "Painel de genes → BED (GTF local)"
+    descricao: >-
+      Resolve as coordenadas de um painel de símbolos contra o GTF do banco SnpEff
+      local (ARS-UCD1.3 — mesmo sistema dos VCFs Run 8) e gera o BED com flanco.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/coordenadas_painel.py
+      --painel {painel} --pad {pad}
+      --gtf /data/snpeff_data/ARS-UCD1.3.113/genes.gtf.gz
+      --saida {dados}/results/genomica/paineis
+    params:
+      - {name: painel, rotulo: "Arquivo do painel (símbolos, 1/linha)", default: "modules/genomica/data/paineis/termotolerancia.txt"}
+      - {name: pad, rotulo: "Flanco em pb (convenção painel 108: 15000)", default: "15000"}
+    inputs: ["modules/genomica/data/paineis/termotolerancia.txt", "E:\\data\\snpeff_data\\ARS-UCD1.3.113\\genes.gtf.gz"]
+    outputs: ["results/genomica/paineis/termotolerancia.bed", "results/genomica/paineis/termotolerancia_resumo.json"]
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~20 s"
+  - key: integridade_vcf
+    titulo: "Integridade dos VCFs/BCFs (1000BG)"
+    descricao: Índice presente, header e primeiro registro legíveis, arquivo a arquivo.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/integridade_vcf.py
+      --dir {dir_vcf} --saida {dados}/results/genomica/integridade
+    params:
+      - {name: dir_vcf, rotulo: "Diretório dos VCFs/BCFs", default: "/data/1000bg_vcf"}
+    inputs: ["E:\\data\\1000bg_vcf"]
+    outputs: ["results/genomica/integridade/integridade.tsv", "results/genomica/integridade/integridade_resumo.json"]
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~1 min"
+  - key: fst_racas
+    titulo: "Fst por raça (Angus × Nelore, plink2)"
+    descricao: >-
+      Fst de Hudson por variante e global entre duas raças, com as listas reais de
+      BioSamples do 1000BG (interseção reportada no log).
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/fst_racas.py
+      --vcf {vcf} --regiao {regiao}
+      --grupo-a {grupo_a} --grupo-b {grupo_b}
+      --saida {dados}/results/genomica/fst
+    params:
+      - {name: vcf, rotulo: "VCF/BCF com genótipos", default: "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf"}
+      - {name: regiao, rotulo: "Região (crom:ini-fim)", default: "14:1-2500000"}
+      - {name: grupo_a, rotulo: "Grupo A (Nome=lista)", default: "Angus=/data/1000bg_metadata/samples_angus.txt"}
+      - {name: grupo_b, rotulo: "Grupo B (Nome=lista)", default: "Nelore=/data/1000bg_metadata/samples_nelore.txt"}
+    inputs: ["E:\\data\\1000bg_vcf", "E:\\data\\1000bg_metadata\\samples_angus.txt", "E:\\data\\1000bg_metadata\\samples_nelore.txt"]
+    outputs: ["results/genomica/fst/fst_top.tsv", "results/genomica/fst/fst_resumo.json"]
+    mem_gb: 4
+    cpus: 2
+    tempo_estimado: "1–3 min"
+workflows:
+  - id: wf_painel_demo
+    titulo: "Do painel ao efeito funcional (demo BTA14)"
+    descricao: >-
+      Extração das variantes do painel demo → frequências AF/MAF → anotação
+      funcional SnpEff. Cada passo consome o arquivo de saída do anterior.
+    passos: [extracao_demo, frequencias_demo, anotacao_demo]
+    testado_em: "2026-09-02"
+    testado_por: "Claude (fila real: 52.881 variantes → 41 efeitos distintos)"
+    nota_didatica: >-
+      O mesmo desenho vale para um painel real: troque o BED demo pelo BED gerado
+      em "Painel de genes → BED" e o restante do fluxo não muda.
 results_spec:
   "Extração (resumo)": "genomica/demo/extracao/extracao_resumo.json"
   "Frequências (resumo)": "genomica/demo/frequencias/frequencias_resumo.json"
   "Frequências (top MAF)": "genomica/demo/frequencias/frequencias.tsv"
   "Anotação (resumo)": "genomica/demo/anotacao/anotacao_resumo.json"
   "Anotação (efeitos)": "genomica/demo/anotacao/efeitos.tsv"
+  "Painel termotolerância (resumo)": "genomica/paineis/termotolerancia_resumo.json"
+  "Integridade 1000BG (resumo)": "genomica/integridade/integridade_resumo.json"
+  "Integridade 1000BG (tabela)": "genomica/integridade/integridade.tsv"
+  "Fst Angus×Nelore (resumo)": "genomica/fst/fst_resumo.json"
+  "Fst Angus×Nelore (top)": "genomica/fst/fst_top.tsv"

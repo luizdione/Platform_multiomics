@@ -6,6 +6,31 @@
 <p>{{ m.descricao_pt if lang == 'pt' else m.descricao_en }}</p>
 {% if aviso %}<p class="alerta">⚠️ {{ aviso }}</p>{% endif %}
 
+{% if fluxo_svg %}
+<section class="fase">
+  <h2>{{ t('fluxograma', lang) }}</h2>
+  <div style="overflow-x:auto">{{ fluxo_svg | safe }}</div>
+</section>
+{% endif %}
+
+{% if m.workflows %}
+<h2>🔗 {{ t('workflows_modulo', lang) }}</h2>
+<section class="cards">
+  {% for wf in m.workflows %}
+  <div class="card">
+    <h3>{{ wf.titulo }}</h3>
+    <p>{{ wf.descricao }}</p>
+    <p class="meta">{{ wf.passos | length }} {{ t('passos', lang) }}:
+      {% for p in wf.passos %}<code>{{ p }}</code>{% if not loop.last %} → {% endif %}{% endfor %}</p>
+    {% if wf.testado_em %}<p class="meta">✅ {{ t('testado_em', lang) }} {{ wf.testado_em }}{% if wf.testado_por %} — {{ wf.testado_por }}{% endif %}</p>{% endif %}
+    <form method="post" action="/modulos/{{ m.id }}/workflows/{{ wf.id }}">
+      <button type="submit">{{ t('rodar', lang) }} workflow</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
 {% for fase in m.fases %}
 <section class="fase">
   <h2>{{ fase.nome }}{% if fase.compartilhada %} <span class="badge compartilhada">tronco comum</span>{% endif %}</h2>
@@ -37,6 +62,11 @@
       {{ spec.tempo_estimado or '—' }}
     </p>
     <form method="post" action="/modulos/{{ m.id }}/scripts/{{ spec.key }}">
+      {% for param in spec.params %}
+      <p class="meta"><label>{{ param.rotulo }}<br>
+        <input type="text" name="{{ param.name }}" value="{{ param.default }}" style="width:100%">
+      </label></p>
+      {% endfor %}
       <button type="submit">{{ t('rodar', lang) }}</button>
     </form>
   </div>

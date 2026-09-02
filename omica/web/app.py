@@ -19,10 +19,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from omica import __version__
+from omica import professor as prof
 from omica.config import REPO_ROOT, get_config
 from omica.jobs import dispatch, guarda_ram, queue
 from omica.registry import STATUS_TYPES, load_registry
 from omica.results import carregar_tabela, resultado_de_job, resultado_do_modulo
+from omica.web.flux import svg_do_modulo
 from omica.web.i18n import normalizar_lang, t
 
 WEB_DIR = Path(__file__).resolve().parent
@@ -64,18 +66,58 @@ def modulo(request: Request, mod_id: str):
             resultados.append((rotulo, "json", resultado_do_modulo(rel)))
         else:
             resultados.append((rotulo, "tabela", carregar_tabela(rel)))
-    return _render(request, "modulo.html", m=m,
+    return _render(request, "modulo.html", m=m, fluxo_svg=svg_do_modulo(m),
                    resultados=resultados, aviso=request.query_params.get("aviso"))
 
 
 @app.post("/modulos/{mod_id}/scripts/{script_key}")
-def rodar_script(request: Request, mod_id: str, script_key: str):
+async def rodar_script(request: Request, mod_id: str, script_key: str):
+    valores = {k: str(v) for k, v in (await request.form()).items()}
     try:
-        job_id, backend = dispatch.lancar_script(mod_id, script_key)
+        job_id, backend = dispatch.lancar_script(mod_id, script_key, valores=valores)
     except (guarda_ram.RecusadoPorRAM, queue.FilaIndisponivel,
-            dispatch.RuntimeIndisponivel, KeyError) as e:
+            dispatch.RuntimeIndisponivel, KeyError, ValueError) as e:
         return RedirectResponse(f"/modulos/{mod_id}?aviso={e}", status_code=303)
     return RedirectResponse(f"/jobs/{job_id}?backend={backend}", status_code=303)
+
+
+@app.post("/modulos/{mod_id}/workflows/{wf_id}")
+def rodar_workflow(request: Request, mod_id: str, wf_id: str):
+    try:
+        wf_run_id, _, backend = dispatch.lancar_workflow(mod_id, wf_id)
+    except (guarda_ram.RecusadoPorRAM, queue.FilaIndisponivel,
+            dispatch.RuntimeIndisponivel, KeyError, ValueError) as e:
+        return RedirectResponse(f"/modulos/{mod_id}?aviso={e}", status_code=303)
+    return RedirectResponse(f"/workflows/{wf_run_id}?backend={backend}", status_code=303)
+
+
+@app.get("/workflows/{wf_run_id}", response_class=HTMLResponse)
+def workflow_run(request: Request, wf_run_id: str):
+    run = queue.ler_workflow_run(wf_run_id)
+    if run is None:
+        return RedirectResponse("/jobs", status_code=303)
+    return _render(request, "workflow.html", run=run,
+                   ativo=run["status"] in ("queued", "running"))
+
+
+@app.get("/professor", response_class=HTMLResponse)
+def professor_home(request: Request):
+    ok, modelo = prof.motor_disponivel()
+    return _render(request, "professor.html", motor_ok=ok, modelo=modelo,
+                   vitrine=prof.workflows_testados(), resposta=None,
+                   frase="", arquivo="")
+
+
+@app.post("/professor/perguntar", response_class=HTMLResponse)
+async def professor_perguntar(request: Request):
+    form = await request.form()
+    frase = str(form.get("frase", "")).strip()
+    arquivo = str(form.get("arquivo", "")).strip()
+    resposta = prof.perguntar(frase, arquivo) if frase else None
+    ok, modelo = prof.motor_disponivel()
+    return _render(request, "professor.html", motor_ok=ok, modelo=modelo,
+                   vitrine=prof.workflows_testados(), resposta=resposta,
+                   frase=frase, arquivo=arquivo)
 
 
 @app.get("/jobs", response_class=HTMLResponse)

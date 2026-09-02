@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — workflow {{ run.workflow }}{% endblock %}
+{% block conteudo %}
+{% if ativo %}<meta http-equiv="refresh" content="4">{% endif %}
+<a class="voltar" href="/modulos/{{ run.modulo }}?lang={{ lang }}">{{ t('voltar', lang) }}</a>
+<h1>🔗 {{ run.titulo }}</h1>
+<p>
+  <span class="badge job-{{ 'running' if run.status == 'queued' else run.status }}">{{ t('status_' + run.status, lang) }}</span>
+  · <code>{{ run.wf_run_id }}</code> · backend <code>{{ run.backend }}</code>
+  {% if ativo %} · {{ t('atualiza_sozinho', lang) }}{% endif %}
+</p>
+
+<table>
+  <thead><tr><th>#</th><th>{{ t('passo', lang) }}</th><th>{{ t('status', lang) }}</th><th>{{ t('console', lang) }}</th></tr></thead>
+  <tbody>
+    {% for p in run.passos %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ p.titulo or p.script or p.job_id }}</td>
+      <td><span class="badge job-{{ p.status }}">{{ t('status_' + p.status, lang) }}</span></td>
+      <td><a href="/jobs/{{ p.job_id }}?lang={{ lang }}">{{ p.job_id }}</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p class="meta">{{ t('workflow_didatica', lang) }}</p>
+{% endblock %}

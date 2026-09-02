@@ -79,5 +79,8 @@ def test_honestidade_dos_status():
         assert m is not None and m.em_construcao() and not m.scripts
     gen = reg.por_id("genomica")
     assert gen is not None and not gen.em_construcao()
-    assert {s.key for s in gen.scripts} == {"extracao_demo", "frequencias_demo", "anotacao_demo"}
+    assert {s.key for s in gen.scripts} == {
+        "extracao_demo", "frequencias_demo", "anotacao_demo",
+        "coordenadas_painel", "integridade_vcf", "fst_racas",
+    }
     assert gen.results_spec  # UI só mostra número lido de arquivo

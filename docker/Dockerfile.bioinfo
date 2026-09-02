@@ -26,6 +26,14 @@ RUN wget -q https://snpeff-public.s3.amazonaws.com/versions/snpEff_latest_core.z
 
 ENV SNPEFF_JAR="/opt/snpEff/snpEff.jar"
 
+# plink2 (Fst por raça, freq por grupo). Alias *_latest.zip é um ponteiro móvel
+# do projeto plink — versão efetiva registrada no log de build via --version.
+RUN wget -q https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_latest.zip \
+    && unzip -q plink2_linux_x86_64_latest.zip -d /usr/local/bin/ \
+    && rm plink2_linux_x86_64_latest.zip \
+    && chmod +x /usr/local/bin/plink2 \
+    && plink2 --version
+
 # Só o necessário para consumir a fila RQ (pins iguais ao requirements.txt);
 # o pacote omica chega montado em /app (PYTHONPATH).
 RUN pip3 install --no-cache-dir --break-system-packages \

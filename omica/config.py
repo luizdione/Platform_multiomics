@@ -23,6 +23,10 @@ _DEFAULTS = {
     "SKILLS_DIR": "/skills" if os.environ.get("OMICA_IN_DOCKER") else r"C:\Users\luizd\.claude\skills_bioinfo",
     "OMICA_REDIS_URL": "",
     "OMICA_LANG": "pt",
+    # Professor Ômico: motor local (Ollama, o mesmo do LILO). Nunca no caminho
+    # crítico — o LLM só PROPÕE planos do catálogo; a execução é determinística.
+    "OMICA_OLLAMA_URL": "http://host.docker.internal:11434" if os.environ.get("OMICA_IN_DOCKER") else "http://localhost:11434",
+    "OMICA_OLLAMA_MODEL": "qwen3:14b",
 }
 
 
@@ -55,6 +59,8 @@ class Config:
     skills_dir: Path        # biblioteca skills_bioinfo (read-only)
     redis_url: str          # vazio = fallback de thread local
     lang: str
+    ollama_url: str         # motor do Professor Ômico (Ollama local, mesmo do LILO)
+    ollama_model: str
     in_docker: bool = field(default_factory=lambda: bool(os.environ.get("OMICA_IN_DOCKER")))
 
     @property
@@ -94,6 +100,8 @@ def get_config() -> Config:
         skills_dir=Path(_obter("SKILLS_DIR", dotenv)),
         redis_url=_obter("OMICA_REDIS_URL", dotenv),
         lang=_obter("OMICA_LANG", dotenv),
+        ollama_url=_obter("OMICA_OLLAMA_URL", dotenv),
+        ollama_model=_obter("OMICA_OLLAMA_MODEL", dotenv),
     )
 
 
