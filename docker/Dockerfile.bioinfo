@@ -5,6 +5,12 @@
 # E:\data\snpeff_data → montado como /data/snpeff_data.
 # Este container É o executor: as ferramentas ficam no PATH do próprio worker
 # (fila por runtime, sem docker.sock — anti-lição nº 11).
+# Fonte do salmon: biocontainer oficial 1.10.3 (mesma linhagem do nf-core 3.14
+# do acervo legado). O tarball standalone 1.12.1 do GitHub tem o subcomando
+# `index` quebrado (aborta com exceção de locale independente do env — testado
+# com C, C.UTF-8 e sem env em 2026-09-03); binários conda trazem RPATH próprio.
+FROM quay.io/biocontainers/salmon:1.10.3--h45fbf2d_5 AS salmon_bc
+
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -34,11 +40,35 @@ RUN wget -q https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_latest.zi
     && chmod +x /usr/local/bin/plink2 \
     && plink2 --version
 
-# Só o necessário para consumir a fila RQ (pins iguais ao requirements.txt);
+# FastQC (mesma fonte do Dockerfile legado — o QC de lá nunca rodou; aqui roda)
+RUN wget -q https://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.12.1.zip \
+    && unzip -q fastqc_v0.12.1.zip -d /opt/ \
+    && chmod +x /opt/FastQC/fastqc \
+    && ln -s /opt/FastQC/fastqc /usr/local/bin/fastqc \
+    && rm fastqc_v0.12.1.zip
+
+# SRA Toolkit (mesma versão do legado)
+RUN wget -q https://ftp-trace.ncbi.nlm.nih.gov/sra/sdk/3.4.1/sratoolkit.3.4.1-ubuntu64.tar.gz \
+    && tar -xzf sratoolkit.3.4.1-ubuntu64.tar.gz \
+    && mv sratoolkit.3.4.1-ubuntu64 /opt/sratoolkit \
+    && rm sratoolkit.3.4.1-ubuntu64.tar.gz
+ENV PATH="/opt/sratoolkit/bin:${PATH}"
+
+# Salmon 1.10.3 copiado do biocontainer (stage salmon_bc — ver cabeçalho)
+COPY --from=salmon_bc /usr/local/ /opt/salmon-bc/
+RUN ln -sf /opt/salmon-bc/bin/salmon /usr/local/bin/salmon \
+    && salmon --version
+
+# Fila RQ (pins iguais ao requirements.txt) + MultiQC;
 # o pacote omica chega montado em /app (PYTHONPATH).
 RUN pip3 install --no-cache-dir --break-system-packages \
     rq==1.16.2 redis==5.2.1 psutil==6.1.0 PyYAML==6.0.2 pydantic==2.10.3 \
-    pytest==8.3.4
+    pytest==8.3.4 multiqc==1.25.1
+
+# Salmon (glibc) aborta com "locale::facet::_S_create_c_locale name not valid"
+# sem locale definido — visto no 1º build do índice em 2026-09-03.
+ENV LC_ALL=C \
+    LANG=C
 
 WORKDIR /app
 CMD ["rq", "worker", "bioinfo", "--url", "redis://omica-redis:6379/0"]

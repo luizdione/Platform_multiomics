@@ -78,8 +78,11 @@ Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê da
 | 2 | Genômica: extração/SnpEff/frequências (0.2.0) + painéis via GTF local, integridade, **Fst Angus×Nelore plink2** (0.3.0) + **VEP** cache pinado 110 (0.4.0) | ✅ 0.4.0 |
 | — | Workflows encadeados (selo "testado") + 🎓 **Professor Ômico** (Ollama/LILO) | ✅ 0.3.0 |
 | 3 | Epigenômica: **painel 108 versionado canônico**, DMCs methylKit, interseção, metaperfil TSS (HOMER/MOFA2 `planejado` c/ motivo) | ✅ núcleo 0.4.0 |
-| 4 | Transcriptômica: SRA + nf-core/rnaseq + DESeq2 | ⏳ |
+| 4 | Transcriptômica: SRA (demo real 25k spots), FastQC/MultiQC, Salmon (índice bovino em refs, biocontainer 1.10.3) e **DESeq2 granulosa 4×4 real** (nf-core DinD `planejado` c/ motivo: acervo legado de 34 amostras reaproveitado) | ✅ 0.5.0 |
 | 5 | ML (RF/XGBoost/SHAP), /skills (815), doctor completo, modo aula | ⏳ |
+
+Se o Docker Desktop cair com erro de socket/config após queda suja da máquina:
+`tools\consertar_docker.ps1` (diagnóstico completo na memória do ambiente).
 
 Workflows selados até aqui: `genomica/wf_painel_demo` (52.881 variantes → 41
 efeitos) e `epigenomica/wf_metilacao_demo` (DMC → painel 108) — ambos visíveis

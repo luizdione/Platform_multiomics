@@ -2,6 +2,38 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [0.5.0] — 2026-09-03 · Fase 4 (transcriptômica)
+
+### Adicionado
+- **Demo real versionado**: subset granulosa Angus da matriz nf-core do sub03
+  (20.543 genes × 8 amostras, 4 summer_heat × 4 winter_control, 1,1 MB) + FASTQ
+  paired-end real de 25 mil spots (SRR24953465, 3 MB) gerado pelo próprio
+  script de download.
+- 5 análises: `expressao_deseq2.R` (worker methyl — DESeq2 do volume
+  reaproveitado; 16.350 genes testados no demo), `volcano_plot.py` (destaques
+  dos genes top), `qc_fastq.py` (FastQC+MultiQC — o QC do legado nunca rodou),
+  `baixar_sra.py` (fastq-dump com `--spots`), `salmon_quant.py` (índice bovino
+  construído 1× em refs/salmon_bostau a partir dos transcritos do nf-core
+  legado: 82.061 transcritos; demo com 89,5% de mapeamento).
+- Workflow **wf_de_granulosa** SELADO (fila methyl real: DESeq2 → volcano).
+- UI: resultados `.html` viram link "abrir relatório" (MultiQC embutido).
+- `tools/consertar_docker.ps1`: conserto em 1 clique do Docker Desktop após
+  queda suja (sockets órfãos + configs nulos — incidentes de 2026-09-02/03).
+- Imagem bioinfo: FastQC 0.12.1, SRA Toolkit 3.4.1, MultiQC 1.25.1 e **Salmon
+  1.10.3 via biocontainer (multi-stage)** — o tarball standalone 1.12.1 do
+  GitHub tem o subcomando `index` quebrado (aborta com exceção de locale
+  independente do env; testado com C, C.UTF-8 e sem env).
+- Etapa nf-core DinD declarada `planejado` com motivo: o acervo legado de 34
+  amostras (E:\data\rnaseq\nfcore_output\sub03) é reaproveitado como fonte.
+
+### Notas de operação
+- A guarda de RAM protege a VM WSL (onde os jobs vivem); o teto de 80% do HOST
+  é regra operacional externa à plataforma (documentado no PMM).
+
+### Testes
+- Suíte 42 passed; smoke RNA: methyl 1/1 (DESeq2+volcano), bioinfo 1/1 (QC).
+  E2E via UI: download demo, QC (50.000 sequências), workflow DE, Salmon — done.
+
 ## [0.4.0] — 2026-09-02 · VEP + Fase 3 (epigenômica)
 
 ### Adicionado — VEP (fecha a Fase 2)

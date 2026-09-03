@@ -1,40 +1,152 @@
-# Módulo Transcriptômica — manifest (Fase 4 do plano: SRA + nf-core/rnaseq via
-# profile nfcore herdado da genomes_platform + DESeq2 no container omica-r-stats).
+# Módulo Transcriptômica — manifest (Fase 4, migração curada do sub03 da
+# genomes_platform congelada). REUSO MÁXIMO: o acervo nf-core/rnaseq do legado
+# (34 amostras, E:\data\rnaseq\nfcore_output\sub03 — salmon/, matriz merged,
+# multiqc/, genome/) é a fonte dos dados; o DESeq2 roda no worker methyl
+# (biblioteca JÁ COMPILADA no volume epigenoma_r_lib). Demo REAL versionado:
+# subset granulosa Angus 4 summer_heat × 4 winter_control (20.543 genes) da
+# matriz merged do nf-core.
 id: transcriptomica
 nome_pt: Transcriptômica
 nome_en: Transcriptomics
 icone: "🧵"
 ordem: 3
 descricao_pt: >-
-  RNA-seq bulk: download SRA, QC (FastQC/MultiQC), quantificação nf-core/rnaseq
-  (STAR+Salmon) e expressão diferencial (DESeq2) integrada aos painéis de genes.
+  RNA-seq bulk: QC (FastQC/MultiQC), download SRA, quantificação Salmon e
+  expressão diferencial (DESeq2) — reaproveitando o acervo nf-core do sub03
+  (granulosa, hipotálamo, pituitária, PBMC, sangue).
 descricao_en: >-
-  Bulk RNA-seq: SRA download, QC (FastQC/MultiQC), nf-core/rnaseq quantification
-  (STAR+Salmon) and differential expression (DESeq2) integrated with gene panels.
+  Bulk RNA-seq: QC (FastQC/MultiQC), SRA download, Salmon quantification and
+  differential expression (DESeq2) — reusing the legacy nf-core sub03 archive.
 fases:
   - id: tra_fase1
     nome: Fase 1 · Aquisição e QC
-    descricao: Download SRA e controle de qualidade dos FASTQ.
+    descricao: Download SRA (parcial ou total) e controle de qualidade dos FASTQ.
     etapas:
       - key: download_sra
-        desc: Download de corridas SRA (SRA Toolkit na imagem omica-bioinfo)
+        desc: Download de corridas SRA com fastq-dump (--spots p/ demo parcial)
         auto: true
-        status_type: planejado
+        status_type: concluido
       - key: qc_fastqc
-        desc: FastQC por amostra + MultiQC consolidado
+        desc: FastQC por amostra + MultiQC consolidado (o QC do legado estava QUEBRADO — reescrito)
         auto: true
-        status_type: planejado
+        status_type: concluido
   - id: tra_fase2
     nome: Fase 2 · Quantificação e expressão diferencial
-    descricao: nf-core/rnaseq 3.14 (profile nfcore, truque DinD /e/data herdado) e DESeq2.
+    descricao: Salmon (índice bovino de refs) e DESeq2 sobre a matriz do nf-core.
     etapas:
-      - key: nfcore_rnaseq
-        desc: Quantificação Salmon via nf-core/rnaseq (único serviço com docker.sock)
+      - key: salmon_quant
+        desc: Quantificação Salmon de amostra nova contra índice em refs/salmon_bostau (biocontainer 1.10.3 — o tarball standalone 1.12.1 tem `index` quebrado)
         auto: true
-        status_type: planejado
+        status_type: concluido
       - key: deseq2
-        desc: Contrastes DESeq2 no container omica-r-stats (renv.lock)
+        desc: DESeq2 (worker methyl, lib do volume reaproveitado) — demo granulosa 4×4 real
+        auto: true
+        status_type: concluido
+      - key: nfcore_rnaseq
+        desc: "Integração nf-core/rnaseq via profile DinD (adiada: o acervo do sub03 já foi computado pelo legado e é reaproveitado; re-rodar 34 amostras não agrega à didática)"
         auto: true
         status_type: planejado
-scripts: []
-results_spec: {}
+scripts:
+  - key: deseq2_demo
+    titulo: "Expressão diferencial (granulosa 4×4, DESeq2)"
+    descricao: >-
+      DESeq2 sobre o subset REAL da matriz nf-core do sub03: granulosa Angus,
+      verão (estresse térmico) × inverno (controle), 20.543 genes.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      Rscript modules/transcriptomica/scripts/expressao_deseq2.R
+      --counts {counts} --coldata {coldata}
+      --referencia winter_control --padj 0.05 --lfc 1
+      --saida {dados}/results/transcriptomica/demo/de
+    params:
+      - {name: counts, rotulo: "Matriz de contagens (genes × amostras)", default: "modules/transcriptomica/demo_data/counts_granulosa.tsv"}
+      - {name: coldata, rotulo: "Tabela de amostras (amostra, condicao)", default: "modules/transcriptomica/demo_data/coldata_granulosa.tsv"}
+    inputs: ["modules/transcriptomica/demo_data/counts_granulosa.tsv", "modules/transcriptomica/demo_data/coldata_granulosa.tsv"]
+    outputs: ["results/transcriptomica/demo/de/de_table.tsv", "results/transcriptomica/demo/de/de_resumo.json"]
+    mem_gb: 3
+    cpus: 1
+    tempo_estimado: "~1 min"
+  - key: volcano_demo
+    titulo: "Volcano plot (DESeq2)"
+    descricao: Volcano da tabela DE com destaques dos genes mais significativos.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/transcriptomica/scripts/volcano_plot.py
+      --de {dados}/results/transcriptomica/demo/de/de_table.tsv
+      --padj 0.05 --lfc 1
+      --saida {dados}/results/transcriptomica/demo/volcano
+    inputs: ["results/transcriptomica/demo/de/de_table.tsv"]
+    outputs: ["results/transcriptomica/demo/volcano/volcano.png", "results/transcriptomica/demo/volcano/volcano_resumo.json"]
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~15 s"
+  - key: qc_demo
+    titulo: "QC de FASTQ (FastQC + MultiQC)"
+    descricao: FastQC por arquivo + relatório MultiQC consolidado do diretório informado.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/transcriptomica/scripts/qc_fastq.py
+      --dir {dir_fastq} --saida {dados}/results/transcriptomica/demo/qc
+    params:
+      - {name: dir_fastq, rotulo: "Diretório com *.fastq.gz", default: "modules/transcriptomica/demo_data"}
+    inputs: ["modules/transcriptomica/demo_data"]
+    outputs: ["results/transcriptomica/demo/qc/multiqc_report.html", "results/transcriptomica/demo/qc/qc_resumo.json"]
+    mem_gb: 2
+    cpus: 1
+    tempo_estimado: "~1 min"
+  - key: baixar_sra
+    titulo: "Baixar corrida SRA (parcial/total)"
+    descricao: fastq-dump com --spots para demo parcial (requer rede). 0 = corrida inteira.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/transcriptomica/scripts/baixar_sra.py
+      --srr {srr} --spots {spots}
+      --saida {dados}/raw/sra/{srr}
+    params:
+      - {name: srr, rotulo: "Acesso SRR", default: "SRR24953465"}
+      - {name: spots, rotulo: "Spots (0 = tudo)", default: "25000"}
+    inputs: []
+    outputs: []
+    mem_gb: 2
+    cpus: 1
+    tempo_estimado: "~1 min (parcial)"
+  - key: salmon_quant_demo
+    titulo: "Salmon quant (demo 25k spots)"
+    descricao: >-
+      Quantifica o FASTQ demo versionado contra o índice bovino (construído uma
+      vez em refs/salmon_bostau a partir dos transcritos do nf-core legado).
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/transcriptomica/scripts/salmon_quant.py
+      --fastq1 {fastq1} --fastq2 {fastq2}
+      --indice /data/omica/refs/salmon_bostau --construir-indice
+      --saida {dados}/results/transcriptomica/demo/quant
+    params:
+      - {name: fastq1, rotulo: "FASTQ R1", default: "modules/transcriptomica/demo_data/SRR24953465_1.fastq.gz"}
+      - {name: fastq2, rotulo: "FASTQ R2 (vazio = single-end)", default: "modules/transcriptomica/demo_data/SRR24953465_2.fastq.gz"}
+    inputs: ["modules/transcriptomica/demo_data", "E:\\data\\rnaseq\\nfcore_output\\sub03\\genome\\genome.transcripts.fa"]
+    outputs: ["results/transcriptomica/demo/quant/quant.sf", "results/transcriptomica/demo/quant/quant_resumo.json"]
+    mem_gb: 6
+    cpus: 2
+    tempo_estimado: "índice 1ª vez ~10 min; quant ~1 min"
+workflows:
+  - id: wf_de_granulosa
+    titulo: "Do estresse térmico ao volcano (granulosa 4×4)"
+    descricao: >-
+      DESeq2 sobre a matriz real granulosa (verão × inverno) → volcano plot com
+      os genes mais significativos destacados.
+    passos: [deseq2_demo, volcano_demo]
+    testado_em: "2026-09-03"
+    testado_por: "Claude (fila methyl real, depends_on: DESeq2 → volcano)"
+    nota_didatica: >-
+      O contraste é o do paper do sub03: células da granulosa de vacas Angus sob
+      calor de verão vs inverno — os DEGs aqui são os mesmos que alimentaram o
+      cruzamento DEG×AIM do sub04.
+results_spec:
+  "Expressão diferencial (resumo)": "transcriptomica/demo/de/de_resumo.json"
+  "Expressão diferencial (top genes)": "transcriptomica/demo/de/de_table.tsv"
+  "Volcano (resumo)": "transcriptomica/demo/volcano/volcano_resumo.json"
+  "Volcano (figura)": "transcriptomica/demo/volcano/volcano.png"
+  "QC FASTQ (resumo)": "transcriptomica/demo/qc/qc_resumo.json"
+  "QC FASTQ (relatório MultiQC)": "transcriptomica/demo/qc/multiqc_report.html"
+  "Salmon quant (resumo)": "transcriptomica/demo/quant/quant_resumo.json"

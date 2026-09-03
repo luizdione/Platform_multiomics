@@ -88,6 +88,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "professor_vitrine": {"pt": "Workflows prontos e testados nesta máquina", "en": "Ready workflows, tested on this machine"},
     "professor_sem_testados": {"pt": "Nenhum workflow testado ainda.", "en": "No tested workflows yet."},
     "modelo": {"pt": "modelo", "en": "model"},
+    "abrir_relatorio": {"pt": "Abrir relatório completo (nova aba)", "en": "Open full report (new tab)"},
     "scripts_modulo": {"pt": "Análises deste módulo", "en": "Module analyses"},
     "resultados_modulo": {"pt": "Resultados (lidos do disco agora)", "en": "Results (read from disk now)"},
     "rodar": {"pt": "▶ Rodar", "en": "▶ Run"},

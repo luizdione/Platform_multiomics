@@ -71,11 +71,15 @@ def test_runtime_invalido_e_rejeitado():
 
 
 def test_honestidade_dos_status():
-    # Só a transcriptômica segue "em construção" (Fase 4); genômica e
-    # epigenômica têm scripts reais e etapas fora de "planejado".
+    # Fases 2-4 têm scripts reais; etapas ainda não entregues ficam "planejado"
+    # com motivo no próprio desc (nf-core DinD, HOMER, MOFA2).
     reg = load_registry(MODULES_DIR)
     tra = reg.por_id("transcriptomica")
-    assert tra is not None and tra.em_construcao() and not tra.scripts
+    assert tra is not None and not tra.em_construcao()
+    assert {s.key for s in tra.scripts} == {
+        "deseq2_demo", "volcano_demo", "qc_demo", "baixar_sra", "salmon_quant_demo",
+    }
+    assert any(w.id == "wf_de_granulosa" for w in tra.workflows)
     gen = reg.por_id("genomica")
     assert gen is not None and not gen.em_construcao()
     assert {s.key for s in gen.scripts} == {

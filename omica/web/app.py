@@ -67,6 +67,9 @@ def modulo(request: Request, mod_id: str):
         elif rel.endswith((".png", ".svg")):
             existe = (get_config().results_dir / rel).exists()
             resultados.append((rotulo, "img", f"/resultados/{rel}" if existe else None))
+        elif rel.endswith(".html"):
+            existe = (get_config().results_dir / rel).exists()
+            resultados.append((rotulo, "link", f"/resultados/{rel}" if existe else None))
         else:
             resultados.append((rotulo, "tabela", carregar_tabela(rel)))
     return _render(request, "modulo.html", m=m, fluxo_svg=svg_do_modulo(m),
