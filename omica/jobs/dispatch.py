@@ -22,6 +22,7 @@ FILA_POR_IMAGEM = {
     "omica-bioinfo": "bioinfo",
     "omica-vep": "vep",
     "omica-methyl": "methyl",
+    "omica-ml": "ml",
 }
 
 

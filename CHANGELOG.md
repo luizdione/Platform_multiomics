@@ -2,6 +2,44 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [0.6.0] — 2026-09-03 · Fase 5 (ML + skills + diagnóstico + didática) — PLANO COMPLETO
+
+### Adicionado — módulo ML (migração curada do bovine_aim_gwas_ml_thermalcore)
+- Fila **ml** + imagem `omica-ml` (sklearn/xgboost/shap pinados). Decisões
+  herdadas explícitas: CV ANINHADA 5×3, métricas balanceadas (bal.acc, F1-macro,
+  MCC, ROC-AUC), painel mínimo top-k selecionado DENTRO do fold (sem vazamento),
+  imputação por mediana, semente 42.
+- `ml_dataset_genotipos.py` (fila bioinfo): matriz 0/1/2 real do BCF Run 8
+  (MAF mínimo + afinamento). `ml_classificar.py` (fila ml): RF+XGBoost, SHAP
+  top-k com figura. Workflow **wf_ml_aims SELADO** — cadeia ENTRE filas
+  (bioinfo→ml): 497 amostras reais (112 Angus × 385 Nelore), 311 SNPs,
+  **balanced accuracy 0,948**. Smoke sintético prova que o SHAP recupera ≥7/10
+  variantes informativas plantadas.
+
+### Adicionado — /skills, glossário, /diagnostico
+- Página **/skills**: as 815 skills (19 domínios) pesquisáveis OFFLINE (índice
+  JSON embutido; clique renderiza o SKILL.md da biblioteca montada read-only).
+- **Glossário fundido e curado** (didatica/glossario.json, 40 termos das 3
+  ômicas + ML + core, origem marcada) com página própria.
+- **Doctor v2** + página **/diagnostico**: workers RQ por fila (as 5), cache
+  VEP, índice Salmon, banco SnpEff, VCFs/listas 1000BG, glossário — no
+  container: 15 checagens ✅ com workers `bioinfo×1, methyl×1, ml×1, omica×1,
+  vep×1`.
+
+### Adicionado — modo aula + gate
+- **Modo aula**: front-matter com `roteiro_aula: true` + `passos:` vira cards
+  "▶ Executar este passo" que disparam as MESMAS rotas dos módulos; Aula 1
+  ("do painel ao efeito funcional") publicada e executável de ponta a ponta.
+- **Gate anti-vazamento** portado (`omica/publish/gate.py`, CLI `python -m
+  omica gate <dir>`): audita árvores de EXPORTAÇÃO (repos de cálculo) com as
+  regras do legado (tokens de IA, arquivos de manuscrito, paths absolutos) —
+  testes provam que reprova e que aprova.
+
+### Testes
+- Suíte **50 passed**; smoke ML 1/1 sintético + dataset real no bioinfo.
+- Correção honesta no porte: guarda `y_prob is not None` do roc_auc restaurada
+  (perdida na 1ª cópia; o smoke pegou).
+
 ## [0.5.0] — 2026-09-03 · Fase 4 (transcriptômica)
 
 ### Adicionado

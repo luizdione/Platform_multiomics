@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ t('glossario', lang) }}{% endblock %}
+{% block conteudo %}
+<h1>📖 {{ t('glossario', lang) }}</h1>
+<p>{{ glossario._meta.descricao }}</p>
+<p class="meta">{{ glossario.termos | length }} {{ t('termos', lang) }} · {{ t('origens', lang) }}: {{ glossario._meta.origens | join(' · ') }}</p>
+
+{% for mod in ['genomica', 'epigenomica', 'transcriptomica', 'ml', 'core'] %}
+{% set termos_mod = glossario.termos | selectattr('modulo', 'equalto', mod) | list %}
+{% if termos_mod %}
+<section class="fase">
+  <h2>{{ mod }}</h2>
+  <table>
+    <tbody>
+      {% for item in termos_mod %}
+      <tr><th style="width:220px">{{ item.termo }}</th><td>{{ item.def_pt }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endfor %}
+{% endblock %}

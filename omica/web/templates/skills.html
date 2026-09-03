@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — Skills{% endblock %}
+{% block conteudo %}
+<h1>🧰 {{ t('skills_titulo', lang) }}</h1>
+<p>{{ t('skills_sub', lang) }}</p>
+<p class="meta">{{ indice.total }} skills · {{ indice.dominios | length }} {{ t('dominios', lang) }} · {{ t('gerado_em', lang) }} {{ indice.gerado_em }}</p>
+
+<section class="fase">
+  <input id="busca" type="text" style="width:100%;padding:.5rem" placeholder="{{ t('skills_busca', lang) }}">
+  <p class="meta" style="margin-top:.5rem">
+    <select id="dominio">
+      <option value="">{{ t('todos_dominios', lang) }}</option>
+      {% for d, n in indice.dominios.items() %}<option value="{{ d }}">{{ d }} ({{ n }})</option>{% endfor %}
+    </select>
+    <span id="contagem"></span>
+  </p>
+</section>
+
+<table>
+  <thead><tr><th>Skill</th><th>{{ t('dominio', lang) }}</th><th>{{ t('descricao', lang) }}</th><th>Stack</th></tr></thead>
+  <tbody id="linhas"></tbody>
+</table>
+
+<script id="dados-skills" type="application/json">{{ skills_json | safe }}</script>
+<script src="/static/skills.js"></script>
+{% endblock %}

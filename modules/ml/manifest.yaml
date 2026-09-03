@@ -1,0 +1,104 @@
+# Módulo ML — manifest (Fase 5, migração curada do bovine_aim_gwas_ml_thermalcore).
+# Agnóstico ao marcador: a mesma engrenagem classifica SNPs (0/1/2), CpGs ou
+# genes — basta trocar a matriz. Demo REAL: genótipos Angus×Nelore do BCF Run 8
+# (fila bioinfo monta o dataset; fila ml classifica — cadeia entre filas).
+id: ml
+nome_pt: Aprendizado de máquina
+nome_en: Machine learning
+icone: "🤖"
+ordem: 4
+descricao_pt: >-
+  Classificação com CV aninhada (RF/XGBoost), métricas balanceadas, SHAP e
+  painel mínimo sem vazamento — herança direta do pipeline do paper de AIMs,
+  aplicável a qualquer matriz (SNP, CpG, expressão).
+descricao_en: >-
+  Nested-CV classification (RF/XGBoost), balanced metrics, SHAP and
+  leakage-free minimal panels — inherited from the AIM paper pipeline,
+  applicable to any marker matrix.
+fases:
+  - id: ml_fase1
+    nome: Fase 1 · Dataset
+    descricao: Matriz de marcadores × amostras com rótulos de grupo.
+    etapas:
+      - key: dataset_genotipos
+        desc: Genótipos 0/1/2 do BCF real (MAF mínimo + afinamento) p/ Angus×Nelore
+        auto: true
+        status_type: concluido
+  - id: ml_fase2
+    nome: Fase 2 · Classificação e interpretação
+    descricao: Nested CV (RF/XGBoost), SHAP, painel mínimo intra-fold.
+    etapas:
+      - key: nested_cv
+        desc: CV aninhada 5×3 com métricas balanceadas (herdada do thermalcore)
+        auto: true
+        status_type: concluido
+      - key: shap_painel
+        desc: SHAP no modelo final + painel mínimo top-k sem vazamento
+        auto: true
+        status_type: concluido
+      - key: robustez
+        desc: "Bootstrap/permutação/calibração (adiado: scripts prontos em bovine_aim_gwas_ml_thermalcore/scripts/robustness — portar na próxima leva)"
+        auto: true
+        status_type: planejado
+scripts:
+  - key: ml_dataset_demo
+    titulo: "Dataset: genótipos Angus × Nelore (BTA14 demo)"
+    descricao: >-
+      Extrai genótipos 0/1/2 das 497 amostras reais na região demo, com MAF
+      mínimo e afinamento — a matriz de entrada do classificador.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/ml/scripts/ml_dataset_genotipos.py
+      --vcf {vcf} --regiao {regiao}
+      --grupo-a {grupo_a} --grupo-b {grupo_b}
+      --maf {maf} --passo {passo}
+      --saida {dados}/results/ml/demo/dataset
+    params:
+      - {name: vcf, rotulo: "VCF/BCF com genótipos", default: "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf"}
+      - {name: regiao, rotulo: "Região", default: "14:1-2500000"}
+      - {name: grupo_a, rotulo: "Grupo A", default: "Angus=/data/1000bg_metadata/samples_angus.txt"}
+      - {name: grupo_b, rotulo: "Grupo B", default: "Nelore=/data/1000bg_metadata/samples_nelore.txt"}
+      - {name: maf, rotulo: "MAF mínimo", default: "0.2"}
+      - {name: passo, rotulo: "Afinamento (1 a cada N)", default: "15"}
+    inputs: ["E:\\data\\1000bg_vcf", "E:\\data\\1000bg_metadata"]
+    outputs: ["results/ml/demo/dataset/genotipos.tsv", "results/ml/demo/dataset/rotulos.tsv", "results/ml/demo/dataset/dataset_resumo.json"]
+    mem_gb: 2
+    cpus: 2
+    tempo_estimado: "~2 min"
+  - key: ml_classificar_demo
+    titulo: "Classificar: nested CV + SHAP + painel mínimo"
+    descricao: >-
+      RF e XGBoost sob CV aninhada 5×3 com métricas balanceadas; SHAP ranqueia
+      os marcadores e o painel mínimo é avaliado sem vazamento.
+    runtime: "image:omica-ml"
+    cmd: >-
+      python3 modules/ml/scripts/ml_classificar.py
+      --matriz {dados}/results/ml/demo/dataset/genotipos.tsv
+      --rotulos {dados}/results/ml/demo/dataset/rotulos.tsv
+      --k-painel {k_painel}
+      --saida {dados}/results/ml/demo/classificacao
+    params:
+      - {name: k_painel, rotulo: "Tamanho do painel mínimo (top-k)", default: "50"}
+    inputs: ["results/ml/demo/dataset/genotipos.tsv", "results/ml/demo/dataset/rotulos.tsv"]
+    outputs: ["results/ml/demo/classificacao/ml_resumo.json", "results/ml/demo/classificacao/shap_top.tsv", "results/ml/demo/classificacao/shap_top.png"]
+    mem_gb: 4
+    cpus: 2
+    tempo_estimado: "3–8 min"
+workflows:
+  - id: wf_ml_aims
+    titulo: "Do BCF ao painel mínimo de AIMs (Angus × Nelore)"
+    descricao: >-
+      Extração de genótipos reais (fila bioinfo) → classificação com CV aninhada,
+      SHAP e painel mínimo (fila ml) — cadeia entre filas especializadas.
+    passos: [ml_dataset_demo, ml_classificar_demo]
+    testado_em: "2026-09-03"
+    testado_por: "Claude (filas bioinfo→ml encadeadas; 497 amostras reais, bal.acc 0,948)"
+    nota_didatica: >-
+      O mesmo desenho do paper de AIMs do autor: o painel mínimo é escolhido
+      dentro de cada fold de treino, nunca olhando o conjunto todo — é assim que
+      se evita o vazamento que infla acurácias.
+results_spec:
+  "Dataset (resumo)": "ml/demo/dataset/dataset_resumo.json"
+  "Classificação (resumo)": "ml/demo/classificacao/ml_resumo.json"
+  "SHAP top marcadores (tabela)": "ml/demo/classificacao/shap_top.tsv"
+  "SHAP top 20 (figura)": "ml/demo/classificacao/shap_top.png"

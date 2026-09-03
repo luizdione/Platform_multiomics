@@ -178,13 +178,32 @@ def ajuda(request: Request):
     return _render(request, "ajuda.html", docs=docs)
 
 
+def _separar_frontmatter(texto: str) -> tuple[dict, str]:
+    """Front-matter YAML (--- ... ---) → (metadados, corpo). Sem bloco → ({}, texto)."""
+    if texto.startswith("---"):
+        partes = texto.split("---", 2)
+        if len(partes) == 3:
+            import yaml
+
+            try:
+                meta = yaml.safe_load(partes[1]) or {}
+                return (meta if isinstance(meta, dict) else {}), partes[2]
+            except yaml.YAMLError:
+                pass
+    return {}, texto
+
+
 @app.get("/ajuda/{doc}", response_class=HTMLResponse)
 def ajuda_doc(request: Request, doc: str):
     caminho = (DIDATICA_DIR / doc).resolve()
     if not caminho.is_file() or caminho.parent != DIDATICA_DIR.resolve() or caminho.suffix != ".md":
         return RedirectResponse("/ajuda", status_code=303)
-    corpo = md.markdown(caminho.read_text(encoding="utf-8"), extensions=["tables", "fenced_code"])
-    return _render(request, "ajuda_doc.html", doc=doc, corpo=corpo)
+    meta, corpo_md = _separar_frontmatter(caminho.read_text(encoding="utf-8"))
+    corpo = md.markdown(corpo_md, extensions=["tables", "fenced_code"])
+    # Modo aula: front-matter com roteiro_aula: true + passos executáveis —
+    # cada botão dispara as MESMAS rotas determinísticas dos módulos.
+    aula = meta.get("passos") if meta.get("roteiro_aula") else None
+    return _render(request, "ajuda_doc.html", doc=doc, corpo=corpo, aula=aula)
 
 
 def _saude_dados() -> dict:
@@ -200,6 +219,49 @@ def _saude_dados() -> dict:
         "erros_manifests": reg.erros,
         "data_dir": str(cfg.data_dir),
     }
+
+
+@app.get("/skills", response_class=HTMLResponse)
+def skills(request: Request):
+    indice_path = REPO_ROOT / "data" / "skills_index.json"
+    if not indice_path.exists():
+        return RedirectResponse("/?lang=" + _lang(request), status_code=303)
+    bruto = indice_path.read_text(encoding="utf-8")
+    import json as _json
+
+    indice = _json.loads(bruto)
+    # </script> dentro de descrição quebraria o bloco embutido — escapa por segurança
+    seguro = bruto.replace("</", "<\\/")
+    return _render(request, "skills.html", indice=indice, skills_json=seguro)
+
+
+@app.get("/skills/{pasta:path}", response_class=HTMLResponse)
+def skill_detalhe(request: Request, pasta: str):
+    """Renderiza o SKILL.md da pasta escolhida, direto da biblioteca montada
+    read-only — leitura offline, zero tokens."""
+    base = get_config().skills_dir.resolve()
+    caminho = (base / pasta / "SKILL.md").resolve()
+    if not caminho.is_file() or base not in caminho.parents:
+        return RedirectResponse("/skills", status_code=303)
+    corpo = md.markdown(caminho.read_text(encoding="utf-8", errors="replace"),
+                        extensions=["tables", "fenced_code"])
+    return _render(request, "ajuda_doc.html", doc=f"skills/{pasta}", corpo=corpo)
+
+
+@app.get("/glossario", response_class=HTMLResponse)
+def glossario(request: Request):
+    import json as _json
+
+    caminho = REPO_ROOT / "didatica" / "glossario.json"
+    dados = _json.loads(caminho.read_text(encoding="utf-8")) if caminho.exists() else {"_meta": {}, "termos": []}
+    return _render(request, "glossario.html", glossario=dados)
+
+
+@app.get("/diagnostico", response_class=HTMLResponse)
+def diagnostico(request: Request):
+    from omica.doctor import rodar as doctor_rodar
+
+    return _render(request, "diagnostico.html", checagens=doctor_rodar(checar_docker=False))
 
 
 @app.get("/resultados/{rel:path}")

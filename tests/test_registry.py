@@ -89,7 +89,11 @@ def test_honestidade_dos_status():
     epi = reg.por_id("epigenomica")
     assert epi is not None and not epi.em_construcao()
     assert {s.key for s in epi.scripts} == {"dmc_demo", "intersecao_demo", "tss_demo"}
-    assert gen.results_spec and epi.results_spec  # UI só mostra número lido de arquivo
+    ml = reg.por_id("ml")
+    assert ml is not None
+    assert {s.key for s in ml.scripts} == {"ml_dataset_demo", "ml_classificar_demo"}
+    assert any(w.id == "wf_ml_aims" for w in ml.workflows)
+    assert gen.results_spec and epi.results_spec and ml.results_spec
 
 
 def test_painel_108_versionado_com_contagem_canonica():

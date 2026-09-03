@@ -5,4 +5,20 @@
 <article class="doc">
   {{ corpo | safe }}
 </article>
+
+{% if aula %}
+<h2>🎒 {{ t('modo_aula', lang) }}</h2>
+<section class="cards">
+  {% for passo in aula %}
+  <div class="card">
+    <h3>{{ loop.index }}. {{ passo.rotulo }}</h3>
+    {% if passo.esperado %}<p class="meta">🎯 {{ passo.esperado }}</p>{% endif %}
+    <form method="post"
+          action="/modulos/{{ passo.modulo }}/{{ 'workflows' if passo.tipo == 'workflow' else 'scripts' }}/{{ passo.alvo }}">
+      <button type="submit">{{ t('executar_passo', lang) }}</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
 {% endblock %}

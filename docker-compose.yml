@@ -109,6 +109,25 @@ services:
       - redis
     restart: unless-stopped
 
+  worker-ml:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ml
+    image: omica-ml
+    container_name: omica-worker-ml
+    environment:
+      OMICA_IN_DOCKER: "1"
+      OMICA_DATA: /data/omica
+      GENOME_DATA: /data
+      OMICA_REDIS_URL: redis://omica-redis:6379/0
+      OMICA_MAX_RAM_GB: "${OMICA_MAX_RAM_GB:-24}"
+    volumes:
+      - ./:/app
+      - "${GENOME_DATA:-E:/data}:/data"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     container_name: omica-redis

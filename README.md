@@ -79,7 +79,10 @@ Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê da
 | — | Workflows encadeados (selo "testado") + 🎓 **Professor Ômico** (Ollama/LILO) | ✅ 0.3.0 |
 | 3 | Epigenômica: **painel 108 versionado canônico**, DMCs methylKit, interseção, metaperfil TSS (HOMER/MOFA2 `planejado` c/ motivo) | ✅ núcleo 0.4.0 |
 | 4 | Transcriptômica: SRA (demo real 25k spots), FastQC/MultiQC, Salmon (índice bovino em refs, biocontainer 1.10.3) e **DESeq2 granulosa 4×4 real** (nf-core DinD `planejado` c/ motivo: acervo legado de 34 amostras reaproveitado) | ✅ 0.5.0 |
-| 5 | ML (RF/XGBoost/SHAP), /skills (815), doctor completo, modo aula | ⏳ |
+| 5 | ML (nested CV+SHAP+painel mínimo, **bal.acc 0,948** Angus×Nelore real), **/skills** (815 offline), doctor v2 + /diagnostico, glossário fundido (40 termos), **modo aula** executável, gate de publicação | ✅ 0.6.0 |
+
+**Plano de 2026-09-01: fases 0–5 completas.** Pendências declaradas com motivo
+nos manifests: HOMER, MOFA2, robustez ML (bootstrap/permutação), nf-core DinD.
 
 Se o Docker Desktop cair com erro de socket/config após queda suja da máquina:
 `tools\consertar_docker.ps1` (diagnóstico completo na memória do ambiente).

@@ -127,6 +127,60 @@ def _null_bytes() -> Checagem:
     return Checagem("Integridade (null-bytes)", OK, "nenhum arquivo .py corrompido")
 
 
+def _workers() -> Checagem:
+    """Workers RQ vivos por fila (via Redis). Sem Redis a checagem vira aviso."""
+    cfg = get_config()
+    if not cfg.redis_url:
+        return Checagem("Workers RQ", AVISO, "sem Redis — fallback de thread (fila default)")
+    try:
+        from redis import Redis
+        from rq import Worker
+
+        conexao = Redis.from_url(cfg.redis_url, socket_connect_timeout=2)
+        filas: dict[str, int] = {}
+        for w in Worker.all(connection=conexao):
+            for q in w.queue_names():
+                filas[q] = filas.get(q, 0) + 1
+        esperadas = {"omica", "bioinfo", "vep", "methyl", "ml"}
+        faltando = sorted(esperadas - set(filas))
+        detalhe = ", ".join(f"{q}×{n}" for q, n in sorted(filas.items())) or "nenhum"
+        if faltando:
+            return Checagem("Workers RQ", AVISO, f"{detalhe} — sem worker: {', '.join(faltando)}")
+        return Checagem("Workers RQ", OK, detalhe)
+    except Exception as e:
+        return Checagem("Workers RQ", AVISO, f"não consultável ({e.__class__.__name__})")
+
+
+def _referencias() -> list[Checagem]:
+    """Referências pesadas que as análises pressupõem (fora do repo, em E:\\)."""
+    cfg = get_config()
+    itens = []
+    alvos = [
+        ("Cache VEP (release 110, ARS-UCD1.2)", cfg.data_dir / "refs" / "vep" / "bos_taurus"),
+        ("Índice Salmon bovino", cfg.data_dir / "refs" / "salmon_bostau"),
+        ("Banco SnpEff ARS-UCD1.3.113", cfg.genome_data / "snpeff_data" / "ARS-UCD1.3.113"),
+        ("VCFs 1000 Bull (Run 8)", cfg.genome_data / "1000bg_vcf"),
+        ("Listas de raça (BioSamples)", cfg.genome_data / "1000bg_metadata"),
+    ]
+    for nome, caminho in alvos:
+        if caminho.exists():
+            itens.append(Checagem(nome, OK, str(caminho)))
+        else:
+            itens.append(Checagem(nome, AVISO, f"{caminho} ausente — análises que o usam falharão"))
+    return itens
+
+
+def _glossario() -> Checagem:
+    caminho = REPO_ROOT / "didatica" / "glossario.json"
+    if not caminho.exists():
+        return Checagem("Glossário", AVISO, "didatica/glossario.json ausente")
+    try:
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+        return Checagem("Glossário", OK, f"{len(dados['termos'])} termos")
+    except Exception as e:
+        return Checagem("Glossário", FALHA, f"ilegível: {e}")
+
+
 def rodar(checar_docker: bool = True) -> list[Checagem]:
     checagens: list[Checagem] = [Checagem("Versão", OK, f"omica {__version__}")]
     if checar_docker:
@@ -135,7 +189,10 @@ def rodar(checar_docker: bool = True) -> list[Checagem]:
     checagens.append(_ram())
     checagens.append(_manifests())
     checagens.append(_redis())
+    checagens.append(_workers())
+    checagens.extend(_referencias())
     checagens.append(_skills())
+    checagens.append(_glossario())
     checagens.append(_porta())
     checagens.append(_null_bytes())
     return checagens

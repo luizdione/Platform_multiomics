@@ -19,6 +19,8 @@ def main(argv: list[str] | None = None) -> int:
     p_doctor = sub.add_parser("doctor", help="diagnóstico da plataforma")
     p_doctor.add_argument("--fix-soft", action="store_true", help="restart compose + reindex das skills")
     sub.add_parser("reindex", help="regenera o índice das skills")
+    p_gate = sub.add_parser("gate", help="gate anti-vazamento p/ repositório de cálculo")
+    p_gate.add_argument("diretorio", help="árvore a auditar (repo de exportação)")
     sub.add_parser("versao", help="imprime a versão")
     args = parser.parse_args(argv)
 
@@ -38,6 +40,10 @@ def main(argv: list[str] | None = None) -> int:
         from omica.skills.build_index import main as reindex_main
 
         return reindex_main()
+    if args.comando == "gate":
+        from omica.publish.gate import main as gate_main
+
+        return gate_main(args.diretorio)
     if args.comando == "versao":
         from omica import __version__
 
