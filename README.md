@@ -23,13 +23,26 @@ python -m omica reindex           # regenera data/skills_index.json (815 skills)
 docker compose run --rm web pytest -q   # testes dentro do container (mesmo lock)
 ```
 
-## Arquitetura (Fase 1)
+## Arquitetura (v0.4)
 
 ```
-navegador → omica-web (FastAPI+Jinja2, :8710) → fila RQ/Redis → omica-worker
-                                     ↘ fallback de thread local (sem Redis)
+navegador → omica-web (FastAPI+Jinja2, :8710) → Redis → FILA POR RUNTIME:
+  "omica"   → omica-worker          (jobs leves, Python)
+  "bioinfo" → omica-worker-bioinfo  (bcftools/samtools/SnpEff/plink2 no PATH)
+  "vep"     → omica-worker-vep      (VEP 113 + cache PINADO release 110 ARS-UCD1.2)
+  "methyl"  → omica-worker-methyl   (R 4.2 + volume epigenoma_r_lib: methylKit etc.)
+Sem docker.sock em worker nenhum: o container do worker É a imagem de ferramentas.
+Fallback sem Redis: thread local (só fila "omica"; filas especializadas recusam).
+
+Workflows = passos encadeados no manifest (validação output→input no boot) →
+RQ depends_on; selo "✅ testado" só após validação real de ponta a ponta.
+🎓 Professor Ômico (/professor): frase em PT → modelo local (Ollama/LILO,
+qwen3:14b) propõe DO CATÁLOGO → você executa com um clique. Zero LLM no
+caminho crítico.
+
 Estado de job = arquivos (status.json + job.log) em E:\data\omica\work\jobs\
-Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê daí)
+Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê daí;
+                figuras servidas por /resultados/<rel> com guarda de caminho)
 ```
 
 - **Código**: `C:\github\omica` (este repo). **Dados pesados**: `E:\data\omica`
@@ -62,7 +75,13 @@ Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê da
 |---|---|---|
 | 0 | Congelar plataformas antigas (tag `archive/2026-09-final`) | ✅ 2026-09-02 |
 | 1 | Esqueleto: casca web, fila, guarda de RAM, doctor, CI | ✅ 0.1.0 |
-| 2 | Genômica: bcftools/SnpEff/VEP/plink2 (migração curada) | ⏳ |
-| 3 | Epigenômica: methylKit/HOMER + painel 108 versionado | ⏳ |
+| 2 | Genômica: extração/SnpEff/frequências (0.2.0) + painéis via GTF local, integridade, **Fst Angus×Nelore plink2** (0.3.0) + **VEP** cache pinado 110 (0.4.0) | ✅ 0.4.0 |
+| — | Workflows encadeados (selo "testado") + 🎓 **Professor Ômico** (Ollama/LILO) | ✅ 0.3.0 |
+| 3 | Epigenômica: **painel 108 versionado canônico**, DMCs methylKit, interseção, metaperfil TSS (HOMER/MOFA2 `planejado` c/ motivo) | ✅ núcleo 0.4.0 |
 | 4 | Transcriptômica: SRA + nf-core/rnaseq + DESeq2 | ⏳ |
 | 5 | ML (RF/XGBoost/SHAP), /skills (815), doctor completo, modo aula | ⏳ |
+
+Workflows selados até aqui: `genomica/wf_painel_demo` (52.881 variantes → 41
+efeitos) e `epigenomica/wf_metilacao_demo` (DMC → painel 108) — ambos visíveis
+na vitrine do Professor Ômico. Demos usam DADOS REAIS versionados (fatia do
+1000 Bull Genomes Run 8 e coverages Bismark do Zenodo do autor).
