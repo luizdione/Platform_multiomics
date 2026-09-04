@@ -37,9 +37,9 @@ fases:
         auto: true
         status_type: concluido
       - key: robustez
-        desc: "Bootstrap/permutação/calibração (adiado: scripts prontos em bovine_aim_gwas_ml_thermalcore/scripts/robustness — portar na próxima leva)"
+        desc: Robustez A1/A2/A3 (bootstrap do painel, recorrência entre folds, IC95%) — herdada de A1A2A3_bootstrap_folds_ic.py
         auto: true
-        status_type: planejado
+        status_type: concluido
 scripts:
   - key: ml_dataset_demo
     titulo: "Dataset: genótipos Angus × Nelore (BTA14 demo)"
@@ -84,6 +84,27 @@ scripts:
     mem_gb: 4
     cpus: 2
     tempo_estimado: "3–8 min"
+  - key: ml_robustez_demo
+    titulo: "Robustez do painel (A1/A2/A3)"
+    descricao: >-
+      Bootstrap de seleção (núcleo estável ≥80%), recorrência do top-k entre os
+      5 folds externos e IC95% percentílico das métricas — as três respostas de
+      parecer herdadas do thermalcore.
+    runtime: "image:omica-ml"
+    cmd: >-
+      python3 modules/ml/scripts/ml_robustez.py
+      --matriz {dados}/results/ml/demo/dataset/genotipos.tsv
+      --rotulos {dados}/results/ml/demo/dataset/rotulos.tsv
+      --k-painel {k_painel} --n-boot {n_boot}
+      --saida {dados}/results/ml/demo/robustez
+    params:
+      - {name: k_painel, rotulo: "Tamanho do painel (top-k)", default: "50"}
+      - {name: n_boot, rotulo: "Reamostragens bootstrap", default: "100"}
+    inputs: ["results/ml/demo/dataset/genotipos.tsv", "results/ml/demo/dataset/rotulos.tsv"]
+    outputs: ["results/ml/demo/robustez/robustez_resumo.json", "results/ml/demo/robustez/nucleo_estavel.tsv", "results/ml/demo/robustez/robustez.png"]
+    mem_gb: 4
+    cpus: 2
+    tempo_estimado: "2–5 min"
 workflows:
   - id: wf_ml_aims
     titulo: "Do BCF ao painel mínimo de AIMs (Angus × Nelore)"
@@ -102,3 +123,6 @@ results_spec:
   "Classificação (resumo)": "ml/demo/classificacao/ml_resumo.json"
   "SHAP top marcadores (tabela)": "ml/demo/classificacao/shap_top.tsv"
   "SHAP top 20 (figura)": "ml/demo/classificacao/shap_top.png"
+  "Robustez A1/A2/A3 (resumo)": "ml/demo/robustez/robustez_resumo.json"
+  "Núcleo estável (tabela)": "ml/demo/robustez/nucleo_estavel.tsv"
+  "Estabilidade bootstrap (figura)": "ml/demo/robustez/robustez.png"

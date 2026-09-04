@@ -11,11 +11,31 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     R_LIBS_USER=/rlib
 
-RUN apt-get update && apt-get install -y python3 python3-pip \
+RUN apt-get update && apt-get install -y python3 python3-pip zip \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --no-cache-dir \
        rq==1.16.2 redis==5.2.1 psutil==6.1.0 PyYAML==6.0.2 pydantic==2.10.3 \
-       numpy==1.26.4 matplotlib==3.9.2 pytest==8.3.4
+       numpy==1.26.4 matplotlib==3.9.2 pytest==8.3.4 \
+       pandas==2.2.3 scipy==1.11.4 h5py==3.11.0 mofapy2==0.6.7
+
+# mofapy2 PINADO em 0.6.7: o MOFA2 R do volume (época do legado) valida a
+# versão python e ABORTA com mais novas (visto em 2026-09-03 com 0.7.2).
+# scipy PINADO em 1.11.4: o mofapy2 0.6.x usa scipy.shape, removido no scipy
+# moderno (AttributeError visto em 2026-09-03 com 1.13.1).
+# Patch herdado do .docker_bootstrap.sh da epigenome_platform: o BayesNet do
+# mofapy2 0.6.x usa API antiga do pandas — declarado e logado, nunca silencioso.
+RUN BN=$(python3 -c "import mofapy2, os; print(os.path.join(os.path.dirname(mofapy2.__file__), 'build_model', 'BayesNet.py'))") \
+    && sed -i 's/\.iteritems()/\.items()/g' "$BN" || true
+
+# HOMER core (motifs de TF) — compilado na imagem (g++/make do rocker);
+# genomas NÃO vão na imagem: o findMotifsGenome.pl recebe o FASTA bovino do
+# banco SnpEff (/data/snpeff_data/.../sequences.fa) e usa -preparsedDir em
+# /data/omica/refs/homer_preparsed (persistente entre execuções).
+RUN mkdir -p /opt/homer && cd /opt/homer \
+    && wget -q http://homer.ucsd.edu/homer/configureHomer.pl \
+    && perl configureHomer.pl -install homer >/tmp/homer_install.log 2>&1 \
+    && tail -3 /tmp/homer_install.log
+ENV PATH="/opt/homer/bin:${PATH}"
 
 WORKDIR /app
 ENTRYPOINT []

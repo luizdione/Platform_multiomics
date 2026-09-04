@@ -41,13 +41,13 @@ fases:
         auto: true
         status_type: concluido
       - key: motifs_homer
-        desc: "HOMER (adiado: imagem própria + genomas configurados — próxima leva)"
+        desc: HOMER known motifs nas CpGs diferenciais (FASTA do SnpEff local; preparse persistente em refs)
         auto: true
-        status_type: planejado
+        status_type: concluido
       - key: mofa2
-        desc: "MOFA2 metilação×SNPs (adiado: job opcional pesado — próxima leva)"
+        desc: MOFA promotor×corpo do painel 108 (mofapy2 entry_point direto — wrapper R aposentado após 4 incompatibilidades de época; com WGS+RRBS pareados a 2ª view vira genótipos)
         auto: true
-        status_type: planejado
+        status_type: concluido
 scripts:
   - key: dmc_demo
     titulo: "DMCs Nelore × Holstein (demo CD4)"
@@ -66,7 +66,7 @@ scripts:
       - {name: grupo_b, rotulo: "Grupo B (padrão no nome do arquivo)", default: "HF"}
       - {name: min_cov, rotulo: "Cobertura mínima por CpG", default: "5"}
     inputs: ["modules/epigenomica/demo_data"]
-    outputs: ["results/epigenomica/demo/dmc/dmc.tsv", "results/epigenomica/demo/dmc/dmc_resumo.json"]
+    outputs: ["results/epigenomica/demo/dmc/dmc.tsv", "results/epigenomica/demo/dmc/todas_cpgs.tsv", "results/epigenomica/demo/dmc/dmc_resumo.json"]
     mem_gb: 3
     cpus: 1
     tempo_estimado: "~1 min"
@@ -100,7 +100,70 @@ scripts:
     mem_gb: 1
     cpus: 1
     tempo_estimado: "~30 s"
+  - key: motifs_homer_demo
+    titulo: "Motifs de TF (HOMER, known)"
+    descricao: >-
+      Top CpGs diferenciais (limiar relaxado e declarado no demo) ±100 pb →
+      HOMER known motifs contra o genoma bovino local.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/motifs_homer.py
+      --cpgs {dados}/results/epigenomica/demo/dmc/todas_cpgs.tsv
+      --q-max {q_max} --top-n {top_n} --flanco 100
+      --saida {dados}/results/epigenomica/demo/motifs
+    params:
+      - {name: q_max, rotulo: "q máximo (relaxado p/ demo)", default: "0.25"}
+      - {name: top_n, rotulo: "Top CpGs por |diff|", default: "200"}
+    inputs: ["results/epigenomica/demo/dmc/todas_cpgs.tsv", "E:\\data\\snpeff_data\\ARS-UCD1.3.113\\sequences.fa"]
+    outputs: ["results/epigenomica/demo/motifs/motifs_top.tsv", "results/epigenomica/demo/motifs/motifs_resumo.json"]
+    mem_gb: 6
+    cpus: 2
+    tempo_estimado: "1ª vez ~15 min (preparse); depois 2–4 min"
+  - key: mofa_preparar_demo
+    titulo: "MOFA — preparar views (promotor × corpo)"
+    descricao: Metilação média por gene do painel 108 em duas views reais pareadas por amostra.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/mofa_preparar.py
+      --dir {dir_cov} --painel modules/epigenomica/data/paineis/painel_108.json
+      --promotor 2000 --min-amostras 4
+      --saida {dados}/results/epigenomica/demo/mofa/views
+    params:
+      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data"}
+    inputs: ["modules/epigenomica/demo_data", "modules/epigenomica/data/paineis/painel_108.json"]
+    outputs: ["results/epigenomica/demo/mofa/views/view_promotor.tsv", "results/epigenomica/demo/mofa/views/view_corpo.tsv", "results/epigenomica/demo/mofa/views/views_resumo.json"]
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~20 s"
+  - key: mofa_rodar_demo
+    titulo: "MOFA — fatores e variância explicada"
+    descricao: >-
+      mofapy2 (entry_point oficial, 3 fatores) sobre as views; R² por
+      fator/view computado explicitamente; separa Nelore×HF no espaço de fatores.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/mofa_treinar.py
+      --views {dados}/results/epigenomica/demo/mofa/views
+      --fatores 3
+      --saida {dados}/results/epigenomica/demo/mofa/modelo
+    inputs: ["results/epigenomica/demo/mofa/views/view_promotor.tsv", "results/epigenomica/demo/mofa/views/view_corpo.tsv"]
+    outputs: ["results/epigenomica/demo/mofa/modelo/mofa_resumo.json", "results/epigenomica/demo/mofa/modelo/variancia_explicada.tsv", "results/epigenomica/demo/mofa/modelo/mofa_fatores.png"]
+    mem_gb: 3
+    cpus: 1
+    tempo_estimado: "~2 min"
 workflows:
+  - id: wf_mofa_demo
+    titulo: "MOFA do painel 108 (promotor × corpo)"
+    descricao: >-
+      Preparação das duas views de metilação por gene → MOFA2 com 3 fatores e
+      variância explicada por view.
+    passos: [mofa_preparar_demo, mofa_rodar_demo]
+    testado_em: "2026-09-04"
+    testado_por: "Claude (fila methyl real; separação Nelore×HF = 1,12 no Fator 1)"
+    nota_didatica: >-
+      MOFA é análise multi-view: aqui as views são promotor × corpo gênico
+      (pareadas por amostra de verdade); com animais WGS+RRBS, uma view vira a
+      matriz de genótipos e o fluxo é o mesmo.
   - id: wf_metilacao_demo
     titulo: "Da cobertura Bismark ao painel 108 (demo CD4)"
     descricao: >-
@@ -119,3 +182,8 @@ results_spec:
   "Interseção painel 108 (por gene)": "epigenomica/demo/intersecao/intersecao.tsv"
   "Metaperfil TSS (resumo)": "epigenomica/demo/tss/tss_resumo.json"
   "Metaperfil TSS (figura)": "epigenomica/demo/tss/tss_perfil.png"
+  "Motifs HOMER (resumo)": "epigenomica/demo/motifs/motifs_resumo.json"
+  "Motifs HOMER (top)": "epigenomica/demo/motifs/motifs_top.tsv"
+  "MOFA views (resumo)": "epigenomica/demo/mofa/views/views_resumo.json"
+  "MOFA (resumo)": "epigenomica/demo/mofa/modelo/mofa_resumo.json"
+  "MOFA fatores (figura)": "epigenomica/demo/mofa/modelo/mofa_fatores.png"

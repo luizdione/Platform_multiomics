@@ -52,6 +52,12 @@ cat(sprintf("DMCs (|diff|>%.0f%%, q<%.2g): %d — hiper: %d, hipo: %d\n",
 tsv <- file.path(saida, "dmc.tsv")
 write.table(tab, tsv, sep = "\t", quote = FALSE, row.names = FALSE)
 
+# Tabela COMPLETA do teste (todas as CpGs, sem filtro): insumo do HOMER, que
+# pode relaxar o limiar de forma declarada quando as DMCs estritas forem poucas.
+todas <- getData(dif)
+todas_tsv <- file.path(saida, "todas_cpgs.tsv")
+write.table(todas, todas_tsv, sep = "\t", quote = FALSE, row.names = FALSE)
+
 resumo <- file.path(saida, "dmc_resumo.json")
 writeLines(toJSON(list(
   gerado_em = format(Sys.time(), "%Y-%m-%dT%H:%M:%S"),
@@ -62,6 +68,7 @@ writeLines(toJSON(list(
   n_dmc = nrow(tab),
   n_hiper_no_grupo_a = sum(tab$meth.diff > 0),
   n_hipo_no_grupo_a = sum(tab$meth.diff < 0),
-  tabela_tsv = tsv
+  tabela_tsv = tsv,
+  todas_cpgs_tsv = todas_tsv
 ), auto_unbox = TRUE, pretty = TRUE, digits = 6), resumo)
 cat(sprintf("RESULTADO: %s\n", resumo))

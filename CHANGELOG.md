@@ -2,6 +2,39 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [0.7.0] — 2026-09-04 · Backlog zerado: robustez ML + HOMER + MOFA
+
+### Adicionado — robustez ML (A1/A2/A3, herdada do thermalcore)
+- `ml_robustez.py` (migração curada de A1A2A3_bootstrap_folds_ic.py): A1
+  bootstrap estratificado da seleção (núcleo estável ≥80%), A2 recorrência do
+  top-k entre os 5 folds externos, A3 IC95% percentílico. E2E no dataset real:
+  núcleo de 5 marcadores, recorrência 5/5=4 e 4/5=18.
+
+### Adicionado — HOMER (motifs de TF)
+- HOMER core compilado na imagem methyl; genoma = FASTA do SnpEff local
+  (assembly coerente), preparse persistido em refs (1ª vez ~35 min; depois
+  minutos). `motifs_homer.py` seleciona top CpGs com limiar RELAXADO E
+  DECLARADO (o demo tem 1 DMC estrita) — E2E: 15 motifs conhecidos, top
+  Zic(Zf). `metilacao_dmc.R` agora exporta a tabela completa do teste
+  (todas_cpgs.tsv), insumo do HOMER.
+
+### Adicionado — MOFA (promotor × corpo do painel 108)
+- `mofa_preparar.py`: 2 views REAIS pareadas por amostra (metilação de
+  promotor ±2 kb × corpo gênico, por gene do painel). Workflow
+  **wf_mofa_demo SELADO**: separação Nelore×HF = 1,12 no Fator 1.
+- **Decisão de engenharia documentada**: o caminho MOFA2-R(volume)+reticulate
+  empilhou 4 incompatibilidades de época (check de versão exige mofapy2 0.6.7;
+  scipy.shape removido → scipy 1.11.4; np.float removido; save→"interrupted"
+  quebrando). O treino migrou para o **entry_point oficial do mofapy2 em
+  python** (`mofa_treinar.py`), com R² por fator/view computado explicitamente.
+  Armadilhas adicionais domadas e comentadas no código: sys.exit() do 0.6.x
+  pós-convergência (SAI COM rc=0 — mascararia falso-done), `set_data_matrix`
+  MUTA a lista de dados recebida, features precisam de nomes únicos entre
+  views, orientação amostras×features. Wrapper R removido (sem fóssil).
+
+### Testes
+- Suíte 50 passed (sets de scripts/workflows dos manifests atualizados).
+
 ## [0.6.0] — 2026-09-03 · Fase 5 (ML + skills + diagnóstico + didática) — PLANO COMPLETO
 
 ### Adicionado — módulo ML (migração curada do bovine_aim_gwas_ml_thermalcore)
