@@ -34,6 +34,25 @@ def _header_ok(caminho: Path) -> bool:
     return r.returncode == 0 and "#CHROM" in r.stdout
 
 
+def _indice(caminho: Path) -> tuple[bool, bool, bool]:
+    """(existe, é mais novo que o dado, o bcftools consegue USAR).
+
+    Conferir só a existência do .tbi/.csi é falso-verde: `bcftools view -H` lê o
+    arquivo em sequência e nunca toca no índice, então índice velho (gerado antes
+    de o VCF ser reescrito) ou truncado passava como "OK" — e só quebrava na hora
+    da consulta por região, no meio de um pipeline.
+    """
+    candidatos = [Path(str(caminho) + s) for s in (".tbi", ".csi")]
+    candidatos += [caminho.with_suffix(caminho.suffix + s) for s in (".tbi", ".csi")]
+    achado = next((c for c in candidatos if c.exists()), None)
+    if achado is None:
+        return False, False, False
+    atual = achado.stat().st_mtime >= caminho.stat().st_mtime
+    r = subprocess.run(["bcftools", "index", "--stats", str(caminho)],
+                       capture_output=True, text=True)
+    return True, atual, (r.returncode == 0 and bool(r.stdout.strip()))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Integridade leve de VCFs/BCFs + índices")
     p.add_argument("--dir", required=True, help="diretório com *.vcf.gz / *.bcf")
@@ -52,17 +71,17 @@ def main() -> None:
 
     linhas, problemas = [], []
     for arq in arquivos:
-        indice = (arq.with_suffix(arq.suffix + ".tbi").exists()
-                  or arq.with_suffix(arq.suffix + ".csi").exists()
-                  or Path(str(arq) + ".tbi").exists() or Path(str(arq) + ".csi").exists())
+        indice, idx_atual, idx_usavel = _indice(arq)
         header = _header_ok(arq)
         registro = _primeiro_registro_ok(arq) if header else False
-        ok = indice and header and registro
+        ok = indice and idx_atual and idx_usavel and header and registro
         if not ok:
             problemas.append(arq.name)
         linhas.append((arq.name, arq.suffix.lstrip("."),
                        round(arq.stat().st_size / 1e9, 2),
                        "sim" if indice else "NAO",
+                       "sim" if idx_atual else "VELHO",
+                       "sim" if idx_usavel else "NAO",
                        "sim" if header else "NAO",
                        "sim" if registro else "NAO",
                        "OK" if ok else "PROBLEMA"))
@@ -70,7 +89,8 @@ def main() -> None:
 
     tsv = saida / "integridade.tsv"
     with tsv.open("w", encoding="utf-8") as f:
-        f.write("ARQUIVO\tFORMATO\tGB\tINDICE\tHEADER\tREGISTRO\tVEREDITO\n")
+        f.write("ARQUIVO\tFORMATO\tGB\tINDICE\tINDICE_ATUAL\tINDICE_USAVEL\t"
+                "HEADER\tREGISTRO\tVEREDITO\n")
         for l in linhas:
             f.write("\t".join(str(x) for x in l) + "\n")
 
@@ -79,6 +99,8 @@ def main() -> None:
         "n_arquivos": len(arquivos),
         "n_ok": len(arquivos) - len(problemas),
         "n_problemas": len(problemas),
+        "checagens": ["indice existe", "indice mais novo que o dado",
+                      "indice usável (bcftools index --stats)", "header", "1º registro"],
         "problemas": problemas,
         "tabela_tsv": str(tsv),
     })

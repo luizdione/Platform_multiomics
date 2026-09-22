@@ -30,6 +30,8 @@ def main() -> None:
     p.add_argument("--construir-indice", action="store_true",
                    help=f"constrói o índice a partir de {TRANSCRITOS_LEGADO} se ausente")
     p.add_argument("--threads", type=int, default=2)
+    p.add_argument("--min-mapeado", type=float, default=50.0,
+                   help="taxa mínima de mapeamento (%%) para o job ser aceito")
     p.add_argument("--saida", required=True)
     args = p.parse_args()
 
@@ -55,6 +57,8 @@ def main() -> None:
     rodar(cmd)
 
     quant = saida / "quant.sf"
+    if not quant.exists():
+        raise SystemExit("salmon não escreveu quant.sf — quantificação falhou")
     n_transcritos = sum(1 for _ in quant.open(encoding="utf-8")) - 1
     meta = saida / "aux_info" / "meta_info.json"
     mapeamento = None
@@ -62,6 +66,15 @@ def main() -> None:
         dados = json.loads(meta.read_text(encoding="utf-8"))
         mapeamento = dados.get("percent_mapped")
     log(f"Transcritos quantificados: {n_transcritos}; % mapeada: {mapeamento}")
+    # Taxa de mapeamento baixa é o sintoma clássico de índice do organismo errado,
+    # contaminação ou biblioteca trocada. Sem portão, 2% mapeado virava job verde
+    # e a matriz de expressão seguia para o DESeq2 como se estivesse boa.
+    if mapeamento is None:
+        raise SystemExit("meta_info.json sem percent_mapped — mapeamento não verificável")
+    if mapeamento < args.min_mapeado:
+        raise SystemExit(
+            f"taxa de mapeamento {mapeamento:.1f}% abaixo do mínimo de {args.min_mapeado}% "
+            f"— confira o índice ({indice.name}) e a espécie dos FASTQ")
 
     escrever_resumo(saida, "quant_resumo.json", {
         "fastq1": fq1.name,
@@ -69,6 +82,7 @@ def main() -> None:
         "indice": str(indice),
         "n_transcritos": n_transcritos,
         "percent_mapeada": mapeamento,
+        "min_mapeado_exigido": args.min_mapeado,
         "quant_sf": str(quant),
     })
 

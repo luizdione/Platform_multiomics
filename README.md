@@ -79,15 +79,25 @@ Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê da
 | — | Workflows encadeados (selo "testado") + 🎓 **Professor Ômico** (Ollama/LILO) | ✅ 0.3.0 |
 | 3 | Epigenômica: **painel 108 versionado canônico**, DMCs methylKit, interseção, metaperfil TSS (HOMER/MOFA2 `planejado` c/ motivo) | ✅ núcleo 0.4.0 |
 | 4 | Transcriptômica: SRA (demo real 25k spots), FastQC/MultiQC, Salmon (índice bovino em refs, biocontainer 1.10.3) e **DESeq2 granulosa 4×4 real** (nf-core DinD `planejado` c/ motivo: acervo legado de 34 amostras reaproveitado) | ✅ 0.5.0 |
-| 5 | ML (nested CV+SHAP+painel mínimo, **bal.acc 0,948** Angus×Nelore real), **/skills** (815 offline), doctor v2 + /diagnostico, glossário fundido (40 termos), **modo aula** executável, gate de publicação | ✅ 0.6.0 |
+| 5 | ML (nested CV+SHAP+painel mínimo, **bal.acc 0,948** Angus×Nelore real — XGBoost com o painel COMPLETO de 311 variantes; o painel mínimo de 50 dá 0,939), **/skills** (815 offline), doctor v2 + /diagnostico, glossário fundido (40 termos), **modo aula** executável, gate de publicação | ✅ 0.6.0 |
+| — | Backlog do plano: HOMER (motifs), MOFA2 (promotor × corpo), robustez ML A1/A2/A3 | ✅ 0.7.0 |
+| — | **Auditoria adversarial** (12 dimensões, 95 achados) → correções científicas, selo com lastro, gate de credenciais | ✅ 0.8.0 |
 
-**Plano de 2026-09-01: fases 0–5 completas.** Pendências declaradas com motivo
-nos manifests: HOMER, MOFA2, robustez ML (bootstrap/permutação), nf-core DinD.
+**Plano de 2026-09-01: fases 0–5 e backlog completos.** Pendência declarada com
+motivo no manifest: nf-core DinD (o acervo legado de 34 amostras é reaproveitado).
 
 Se o Docker Desktop cair com erro de socket/config após queda suja da máquina:
 `tools\consertar_docker.ps1` (diagnóstico completo na memória do ambiente).
 
-Workflows selados até aqui: `genomica/wf_painel_demo` (52.881 variantes → 41
-efeitos) e `epigenomica/wf_metilacao_demo` (DMC → painel 108) — ambos visíveis
-na vitrine do Professor Ômico. Demos usam DADOS REAIS versionados (fatia do
-1000 Bull Genomes Run 8 e coverages Bismark do Zenodo do autor).
+Workflows encadeados e selados: `genomica/wf_painel_demo`,
+`epigenomica/wf_metilacao_demo`, `epigenomica/wf_mofa_demo`,
+`transcriptomica/wf_de_granulosa` e `ml/wf_ml_aims` — visíveis na vitrine do
+Professor Ômico. Demos usam DADOS REAIS versionados (fatia do 1000 Bull Genomes
+Run 8 e coverages Bismark do Zenodo do autor).
+
+> ⚠️ **Selos vencidos pela auditoria (v0.8.0).** As correções científicas
+> mudaram scripts de 4 dos 5 workflows selados, então `python -m omica doctor`
+> passa a acusar `Selos de workflow: 4 vencido(s) — re-executar`. **Os números
+> publicados desses workflows ainda são os da versão anterior.** Re-executar na
+> plataforma (ou pelos smokes de container) e só então recarimbar o
+> `hash_scripts` do manifest. O workflow `ml/wf_ml_aims` não foi afetado.

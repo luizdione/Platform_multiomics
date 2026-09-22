@@ -47,7 +47,8 @@ def carregar_tabela(chave_relativa: str, max_linhas: int = 15) -> Optional[dict[
     sep = "\t" if caminho.suffix.lower() in (".tsv", ".txt") else ","
     try:
         with caminho.open("r", encoding="utf-8") as f:
-            colunas = f.readline().rstrip("\n").split(sep)
+            cabecalho = f.readline().rstrip("\n")
+            colunas = cabecalho.split(sep)
             linhas = []
             total = 0
             for linha in f:
@@ -56,5 +57,9 @@ def carregar_tabela(chave_relativa: str, max_linhas: int = 15) -> Optional[dict[
                     linhas.append(linha.rstrip("\n").split(sep))
     except OSError:
         return None
+    # Arquivo truncado/vazio não é "resultado de 0 linhas": é ausência de dado.
+    # Sem isto, um job que morreu no meio aparecia como tabela válida e vazia.
+    if not cabecalho.strip():
+        return None
     return {"colunas": colunas, "linhas": linhas, "total_linhas": total,
-            "exibidas": len(linhas), "arquivo": str(caminho)}
+            "exibidas": len(linhas), "vazia": total == 0, "arquivo": str(caminho)}

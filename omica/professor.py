@@ -83,14 +83,26 @@ def catalogo() -> dict[str, Any]:
 
 
 def workflows_testados() -> list[dict[str, Any]]:
-    """Workflows com selo de validação real — a vitrine da aba do Professor."""
+    """Workflows com selo de validação real — a vitrine da aba do Professor.
+
+    O selo só vale enquanto os scripts forem os mesmos que rodaram no E2E: cada
+    item traz `vencido` para a UI poder dizer que aquele ✅ está desatualizado,
+    em vez de exibir número antigo como se fosse resultado corrente.
+    """
+    from omica.registry import hash_dos_passos
+
     reg = load_registry()
     vitrine = []
     for m in reg.modules:
         for w in m.workflows:
-            if w.testado_em:
-                vitrine.append({"modulo": m.id, "modulo_nome": m.nome_pt,
-                                "icone": m.icone, "wf": w})
+            if not w.testado_em:
+                continue
+            atual = hash_dos_passos(m, w)
+            vencido = (not w.hash_scripts) or w.hash_scripts != atual
+            vitrine.append({"modulo": m.id, "modulo_nome": m.nome_pt,
+                            "icone": m.icone, "wf": w, "vencido": vencido,
+                            "motivo_vencido": ("sem hash de referência" if not w.hash_scripts
+                                               else "script alterado desde o teste")})
     return vitrine
 
 

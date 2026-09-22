@@ -43,7 +43,16 @@ def test_smoke_dmc_e_intersecao(tmp_path):
     resumo = json.loads((saida_dmc / "dmc_resumo.json").read_text(encoding="utf-8"))
     assert resumo["grupo_a"]["n"] == 3 and resumo["grupo_b"]["n"] == 3
     assert resumo["n_cpg_testados"] > 100
-    assert resumo["n_dmc"] >= 0  # demo pequeno pode ter poucas DMCs — o teste é o fluxo
+    # `n_dmc >= 0` era tautológico (passava com o script quebrado). O demo do
+    # Zenodo produz DMCs de verdade — se não produzir, algo quebrou.
+    assert resumo["n_dmc"] > 0, "nenhuma DMC no demo: pipeline quebrado, não biologia"
+    assert resumo["n_hiper_no_grupo_a"] + resumo["n_hipo_no_grupo_a"] == resumo["n_dmc"]
+    # `startswith("BH")` NÃO servia: a string do bug era "BH (methylKit/SLIM)",
+    # que também começa com BH — a assertiva passaria com o código errado.
+    correcao = resumo["criterios"]["correcao"]
+    assert "Benjamini" in correcao and "SLIM" not in correcao, (
+        f"o resumo tem de declarar a correção que o R realmente rodou: {correcao!r}")
+    assert (saida_dmc / "todas_cpgs.tsv").exists()  # insumo do HOMER
 
     saida_int = tmp_path / "intersecao"
     _py("intersecao_dmc_painel.py", "--dmc", str(saida_dmc / "dmc.tsv"),
@@ -51,6 +60,12 @@ def test_smoke_dmc_e_intersecao(tmp_path):
     resumo_i = json.loads((saida_int / "intersecao_resumo.json").read_text(encoding="utf-8"))
     assert resumo_i["n_genes_painel"] == 108
     assert resumo_i["n_dmc_total"] == resumo["n_dmc"]
+    # O bug publicava 320 "no painel" de 314 no total. Esta é a checagem que
+    # teria pego, e ela vale para qualquer dado:
+    assert resumo_i["n_dmc_no_painel"] <= resumo_i["n_dmc_total"], (
+        "mais DMCs dentro do painel do que no total — dupla contagem por janela")
+    assert resumo_i["n_atribuicoes_gene"] >= resumo_i["n_dmc_no_painel"]
+    assert resumo_i["n_genes_com_dmc"] <= resumo_i["n_genes_painel"]
 
 
 @pytest.mark.smoke
@@ -61,5 +76,11 @@ def test_smoke_perfil_tss(tmp_path):
         "--grupo-a", "Nelore", "--grupo-b", "HF",
         "--janela", "2000", "--bin", "100", "--saida", str(tmp_path))
     resumo = json.loads((tmp_path / "tss_resumo.json").read_text(encoding="utf-8"))
-    assert resumo["n_tss"] == 108
+    assert resumo["n_tss"] == 108  # vem do painel
+    # …e ESTES vêm do dado: a versão anterior do smoke passava com o metaperfil
+    # VAZIO, porque só conferia a contagem do painel e o tamanho do PNG.
+    assert resumo["grupo_a"]["cpgs_agregados"] > 0
+    assert resumo["grupo_b"]["cpgs_agregados"] > 0
+    assert resumo["n_tss_fita_negativa"] > 0, (
+        "o painel tem genes na fita −; se a contagem for 0, a orientação se perdeu")
     assert (tmp_path / "tss_perfil.png").stat().st_size > 5000

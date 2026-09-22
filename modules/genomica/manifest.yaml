@@ -173,6 +173,7 @@ workflows:
     passos: [extracao_demo, frequencias_demo, anotacao_demo]
     testado_em: "2026-09-02"
     testado_por: "Claude (fila real: 52.881 variantes → 41 efeitos distintos)"
+    hash_scripts: "220c3f92838d7e83"
     nota_didatica: >-
       O mesmo desenho vale para um painel real: troque o BED demo pelo BED gerado
       em "Painel de genes → BED" e o restante do fluxo não muda.

@@ -22,12 +22,13 @@ import numpy as np
 from _comum import escrever_resumo, log
 
 
-def _tss_por_cromossomo(painel: Path) -> dict[str, list[tuple[int, str]]]:
+def _tss_por_cromossomo(painel: Path) -> dict[str, list[tuple[int, int, str]]]:
     dados = json.loads(painel.read_text(encoding="utf-8"))
-    por_crom: dict[str, list[tuple[int, str]]] = {}
+    por_crom: dict[str, list[tuple[int, int, str]]] = {}
     for simbolo, g in dados["genes"].items():
-        tss = g["inicio"] if g["fita"] >= 0 else g["fim"]
-        por_crom.setdefault(str(g["cromossomo"]), []).append((tss, simbolo))
+        fita = 1 if g["fita"] >= 0 else -1
+        tss = g["inicio"] if fita > 0 else g["fim"]
+        por_crom.setdefault(str(g["cromossomo"]), []).append((tss, fita, simbolo))
     return por_crom
 
 
@@ -41,8 +42,11 @@ def _acumular(arquivos: list[Path], tss_map, janela: int, n_bins: int):
                 if len(campos) < 6:
                     continue
                 crom, pos, pct = campos[0], int(campos[1]), float(campos[3])
-                for tss, _ in tss_map.get(crom, ()):
-                    d = pos - tss
+                for tss, fita, _ in tss_map.get(crom, ()):
+                    # Na fita − o "upstream" fica em coordenada MAIOR: sem o sinal
+                    # da fita, esses genes entram ESPELHADOS no metaperfil e o
+                    # degrau de metilação no TSS some na média.
+                    d = (pos - tss) * fita
                     if -janela <= d < janela:
                         b = int((d + janela) * n_bins // (2 * janela))
                         soma[b] += pct
@@ -81,6 +85,11 @@ def main() -> None:
     media_a, cpgs_a = _acumular(arq_a, tss_map, args.janela, n_bins)
     media_b, cpgs_b = _acumular(arq_b, tss_map, args.janela, n_bins)
     log(f"CpGs agregados: {args.grupo_a}={cpgs_a}, {args.grupo_b}={cpgs_b}")
+    # Falso-done: sem CpG agregada a figura sai em branco e o job "concluiria".
+    if cpgs_a == 0 or cpgs_b == 0:
+        raise SystemExit(
+            f"nenhuma CpG na janela ±{args.janela} pb ({args.grupo_a}={cpgs_a}, "
+            f"{args.grupo_b}={cpgs_b}) — confira o painel e o assembly dos coverages")
 
     import matplotlib
     matplotlib.use("Agg")
@@ -103,6 +112,7 @@ def main() -> None:
     escrever_resumo(saida, "tss_resumo.json", {
         "painel": painel.name,
         "n_tss": n_tss,
+        "n_tss_fita_negativa": sum(1 for v in tss_map.values() for _, fita, _ in v if fita < 0),
         "janela_pb": args.janela,
         "bin_pb": args.bin,
         "grupo_a": {"nome": args.grupo_a, "n_amostras": len(arq_a), "cpgs_agregados": cpgs_a},

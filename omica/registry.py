@@ -96,6 +96,10 @@ class WorkflowSpec(BaseModel):
     passos: list[str]  # keys de scripts deste módulo, na ordem
     testado_em: str = ""
     testado_por: str = ""
+    # Impressão digital dos scripts NO DIA do teste. Sem ela o selo é decorativo:
+    # sobrevive à reescrita do próprio script que certifica (auditoria 2026-09-14).
+    # Preenchida por `python -m omica selos --gravar` DEPOIS de um E2E real.
+    hash_scripts: str = ""
     nota_didatica: str = ""
 
 
@@ -143,7 +147,7 @@ def load_registry(modules_dir: Path = MODULES_DIR) -> Registry:
             m = Manifest.model_validate(bruto)
             if m.id != pasta.name:
                 raise ValueError(f"id {m.id!r} difere do nome da pasta {pasta.name!r}")
-            _validar_referencias(m)
+            _validar_referencias(m, modules_dir)
             reg.modules.append(m)
         except Exception as e:  # erro de UM módulo nunca derruba a plataforma
             reg.erros[pasta.name] = str(e)
@@ -151,20 +155,89 @@ def load_registry(modules_dir: Path = MODULES_DIR) -> Registry:
     return reg
 
 
-def _validar_referencias(m: Manifest) -> None:
-    """Classe de bug das plataformas antigas: referência a arquivo não versionado."""
+def _validar_referencias(m: Manifest, modules_dir: Path = MODULES_DIR) -> None:
+    """Classe de bug das plataformas antigas: referência a arquivo não versionado.
+
+    O cmd do manifest é SEMPRE "<interpretador> <caminho relativo à raiz do repo>"
+    (script_job.py roda com cwd=REPO_ROOT). A versão anterior olhava só o PRIMEIRO
+    token — que é "python3"/"Rscript" e nunca termina em .py/.R/.sh —, de modo que
+    o laço inteiro era código morto: um manifest podia apontar para script apagado
+    e carregar limpo, com o doctor dizendo "4 módulos válidos".
+    """
     faltando: list[str] = []
+    raiz = modules_dir.parent  # cwd dos jobs
+    base_modulo = modules_dir / m.id
     for fase in m.fases:
         for etapa in fase.etapas:
-            if etapa.script and not (m.dir() / "scripts" / etapa.script).exists():
+            if etapa.script and not (base_modulo / "scripts" / etapa.script).exists():
                 faltando.append(f"etapa {etapa.key} → scripts/{etapa.script}")
     for spec in m.scripts:
-        candidato = m.dir() / "scripts" / spec.cmd.split()[0]
-        if spec.cmd.split()[0].endswith((".py", ".R", ".sh")) and not candidato.exists():
-            faltando.append(f"script {spec.key} → {candidato.name}")
+        alvo = next((t for t in spec.cmd.split() if t.endswith((".py", ".R", ".sh"))), None)
+        if alvo is None:
+            faltando.append(f"script {spec.key} → cmd sem arquivo executável: {spec.cmd!r}")
+        elif not (raiz / alvo).exists():
+            faltando.append(f"script {spec.key} → {alvo}")
     if faltando:
         raise ValueError("referências quebradas: " + "; ".join(faltando))
     _validar_workflows(m)
+
+
+def hash_dos_passos(m: Manifest, wf: WorkflowSpec, modules_dir: Path = MODULES_DIR) -> str:
+    """sha256 dos ARQUIVOS de script que o workflow encadeia, na ordem dos passos.
+
+    É o que dá sentido ao selo: se qualquer script mudar, o hash muda e o
+    diagnóstico passa a dizer que o workflow precisa ser re-executado antes de o
+    selo (e os números que ele publica) valerem de novo.
+
+    As quebras de linha são normalizadas para LF: com core.autocrlf=true o mesmo
+    arquivo é CRLF no host Windows e LF dentro do container, e sem isso o selo
+    apareceria vencido em um dos dois lados sempre.
+    """
+    import hashlib
+
+    raiz = modules_dir.parent
+    specs = {s.key: s for s in m.scripts}
+    h = hashlib.sha256()
+    # _comum.py entra: é importado por TODOS os scripts do módulo (escrever_resumo,
+    # o contrato "RESULTADO:", rodar()), e mexer nele muda o resultado de todos os
+    # passos sem mudar nenhum script individualmente.
+    comum = modules_dir / m.id / "scripts" / "_comum.py"
+    h.update(comum.read_bytes().replace(b"\r\n", b"\n") if comum.exists() else b"<sem _comum>")
+    for passo in wf.passos:
+        spec = specs.get(passo)
+        h.update(passo.encode("utf-8"))
+        if spec is None:
+            h.update(b"<passo inexistente>")
+            continue
+        # o cmd inteiro entra: trocar um parâmetro científico no manifest (--maf,
+        # --qvalue, --regiao) muda o resultado sem tocar numa linha de código.
+        h.update(" ".join(spec.cmd.split()).encode("utf-8"))
+        for par in spec.params:
+            h.update(f"{par.name}={par.default}".encode("utf-8"))
+        alvo = next((t for t in spec.cmd.split() if t.endswith((".py", ".R", ".sh"))), None)
+        caminho = (raiz / alvo) if alvo else None
+        if caminho and caminho.exists():
+            h.update(caminho.read_bytes().replace(b"\r\n", b"\n"))
+        else:
+            h.update(b"<ausente>")
+    return h.hexdigest()[:16]
+
+
+def selos_vencidos(modules_dir: Path = MODULES_DIR) -> list[tuple[str, str, str]]:
+    """(modulo, workflow, motivo) para todo workflow selado cujo script mudou."""
+    fora = []
+    for m in load_registry(modules_dir).modules:
+        for wf in m.workflows:
+            if not wf.testado_em:
+                continue
+            atual = hash_dos_passos(m, wf, modules_dir)
+            if not wf.hash_scripts:
+                fora.append((m.id, wf.id, "selo sem hash_scripts (não verificável)"))
+            elif wf.hash_scripts != atual:
+                fora.append((m.id, wf.id,
+                             f"script mudou desde {wf.testado_em} "
+                             f"({wf.hash_scripts} → {atual}) — re-executar"))
+    return fora
 
 
 def _validar_workflows(m: Manifest) -> None:

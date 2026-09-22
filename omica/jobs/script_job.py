@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+from pathlib import Path
 
 from omica.config import REPO_ROOT
 from omica.jobs.queue import append_log, read_status, write_status
@@ -46,6 +47,20 @@ def executar(job_id: str) -> None:
     if rc != 0:
         raise RuntimeError(f"script terminou com código {rc}")
     if result_path:
+        # Falso-done: returncode 0 NÃO prova que o artefato existe (ferramenta que
+        # sai 0 sem escrever, disco cheio, caminho de dentro do container que não
+        # existe no volume). Sem esta conferência, a UI mostraria "concluído" e
+        # depois "sem dados" — e o workflow encadeado seguiria para o passo 2.
+        alvo = Path(result_path)
+        if not alvo.is_absolute():
+            alvo = REPO_ROOT / alvo
+        if not alvo.exists():
+            raise RuntimeError(
+                f"script anunciou 'RESULTADO: {result_path}' mas o arquivo não existe")
+        if alvo.is_file() and alvo.stat().st_size == 0:
+            raise RuntimeError(f"resultado vazio (0 bytes): {result_path}")
         write_status(job_id, "done", result_path=result_path)
     else:
+        append_log(job_id, "AVISO: script não imprimiu 'RESULTADO: <caminho>' "
+                           "— job sem artefato declarado (nada a exibir na UI)")
         write_status(job_id, "done")

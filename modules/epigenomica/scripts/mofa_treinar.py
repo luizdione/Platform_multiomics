@@ -88,13 +88,28 @@ def main() -> None:
     nomes_views = ["promotor", "corpo"]
     r2 = {}
     for vi, (nome, W) in enumerate(zip(nomes_views, Ws)):
-        Y = matrizes[vi] - np.nanmean(matrizes[vi], axis=0, keepdims=True)  # centrado como no treino
+        # O modelo treinou com scale_views=True (set_data_options, acima): W e Z
+        # vivem no espaço ESCALADO. Comparar Z·Wᵀ com um Y apenas centrado mede
+        # resíduo em unidade diferente da do sinal e o R² sai sem sentido (podia
+        # até passar de 100% ou ficar negativo). Reproduzimos aqui a MESMA
+        # transformação do treino: centrar e dividir pelo desvio-padrão da view.
+        Y = matrizes[vi] - np.nanmean(matrizes[vi], axis=0, keepdims=True)
+        escala = float(np.nanstd(Y))
+        if escala > 0:
+            Y = Y / escala
         mascara = ~np.isnan(Y)
         ss_total = np.nansum(Y[mascara] ** 2)
         r2[nome] = []
         for k in range(args.fatores):
             residuo = Y - np.outer(Z[:, k], W[:, k])
             r2[nome].append(round(100 * (1 - np.nansum(residuo[mascara] ** 2) / ss_total), 2))
+
+    for nome in nomes_views:  # sanidade: R² fora de [-100, 100] denuncia escala errada
+        for k, v in enumerate(r2[nome]):
+            if not (-100.0 <= v <= 100.0):
+                raise SystemExit(
+                    f"R² implausível ({v}%) no Factor{k + 1} da view {nome} — "
+                    "escala de Y incompatível com a do modelo")
 
     with (saida / "variancia_explicada.tsv").open("w", encoding="utf-8") as f:
         f.write("fator\t" + "\t".join(nomes_views) + "\n")

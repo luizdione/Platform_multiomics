@@ -18,9 +18,12 @@ def test_wf_painel_demo_valido_e_selado():
 
 
 def test_workflow_sem_encadeamento_e_rejeitado(tmp_path):
-    pasta = tmp_path / "solto"
-    pasta.mkdir()
-    (pasta / "scripts").mkdir()
+    # O layout do fixture espelha o REAL (<raiz>/modules/<id>/scripts/...), porque
+    # os cmd dos manifests são relativos à raiz do repo e agora a validação de
+    # referências resolve por aí (antes ela era código morto e nada resolvia).
+    modules = tmp_path / "modules"
+    pasta = modules / "solto"
+    (pasta / "scripts").mkdir(parents=True)
     (pasta / "scripts" / "a.py").write_text("", encoding="utf-8")
     manifesto = {
         "id": "solto", "nome_pt": "S", "nome_en": "S",
@@ -35,7 +38,7 @@ def test_workflow_sem_encadeamento_e_rejeitado(tmp_path):
         "workflows": [{"id": "w", "titulo": "w", "passos": ["a", "b"]}],
     }
     (pasta / "manifest.yaml").write_text(yaml.safe_dump(manifesto), encoding="utf-8")
-    reg = load_registry(tmp_path)
+    reg = load_registry(modules)
     assert "solto" in reg.erros
     assert "não consome nenhum output" in reg.erros["solto"]
 

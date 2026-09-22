@@ -4,7 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omica"
-version = "0.1.0"
+# FONTE ÚNICA da versão: o arquivo VERSION (o mesmo que omica.__version__ lê).
+# Antes havia um literal aqui, fóssil em 0.1.0 enquanto VERSION e a tag já
+# estavam em 0.7.0 — o pacote instalado se identificava com a versão errada.
+dynamic = ["version"]
 description = "Plataforma localhost unificada de ômicas (genômica, epigenômica, transcriptômica) — IFRJ"
 requires-python = ">=3.11"
 # Faixas declaradas AQUI (único lugar); o lock pinado para os containers é o
@@ -25,6 +28,9 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9"]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
 
 [tool.setuptools.packages.find]
 include = ["omica*"]

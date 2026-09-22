@@ -17,6 +17,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -33,6 +34,57 @@ def _ler_grupo(arg: str) -> tuple[str, set[str]]:
     return nome, ids
 
 
+def top_por_fst(colunas: list[str], corpo: list[str], top: int, min_obs: int = 1
+                ) -> tuple[list[str], int, int, int, int]:
+    """Top-N variantes por Fst, DESCARTANDO o que não é comparável.
+
+    ARMADILHA que este código existe para evitar: float("nan") NÃO levanta
+    ValueError — Python aceita a string "nan". A versão anterior ordenava com
+    chaves NaN, e como toda comparação com NaN é falsa a ordem saiu incoerente:
+    no contraste Angus×Nelore real, 4 das 5 primeiras linhas do "top 20" eram
+    variantes com OBS_CT=0 (nenhum genótipo observado) e Fst NaN, com o maior
+    Fst verdadeiro (0,53) aparecendo só na 5ª linha.
+
+    Descartar só OBS_CT==0 NÃO basta (revisão de 2026-09-14): no mesmo arquivo,
+    uma variante com 4 genótipos observados de 497 tem Fst=1,0 e passaria a
+    encabeçar a tabela publicada — o mesmo sintoma do bug do NaN (variante sem
+    informação no topo), agora com um número que se lê como "fixação completa
+    entre raças". Daí o limiar `min_obs`, declarado no resumo.
+
+    Devolve (linhas_top, n_comparaveis, n_nao_finito, n_sem_obs, n_baixa_cobertura).
+    """
+    idx_fst = colunas.index([c for c in colunas if "FST" in c.upper()][0])
+    idx_obs = colunas.index("OBS_CT") if "OBS_CT" in colunas else None
+    avaliaveis: list[tuple[float, str]] = []
+    n_nao_finito = n_sem_obs = n_baixa_cobertura = 0
+    for linha in corpo:
+        campos = linha.split()
+        if idx_obs is not None:
+            try:
+                obs = int(float(campos[idx_obs]))
+            except (ValueError, IndexError):
+                n_sem_obs += 1
+                continue
+            if obs == 0:
+                n_sem_obs += 1
+                continue
+            if obs < min_obs:
+                n_baixa_cobertura += 1
+                continue
+        try:
+            valor = float(campos[idx_fst])
+        except (ValueError, IndexError):
+            n_nao_finito += 1
+            continue
+        if not math.isfinite(valor):
+            n_nao_finito += 1
+            continue
+        avaliaveis.append((valor, linha))
+    avaliaveis.sort(key=lambda x: x[0], reverse=True)
+    return ([l for _, l in avaliaveis[:top]], len(avaliaveis), n_nao_finito,
+            n_sem_obs, n_baixa_cobertura)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Fst Hudson entre 2 grupos (plink2)")
     p.add_argument("--vcf", required=True, help="VCF/BCF com genótipos (Run 8)")
@@ -40,6 +92,9 @@ def main() -> None:
     p.add_argument("--grupo-a", required=True, help="Nome=/caminho/lista_biosamples.txt")
     p.add_argument("--grupo-b", required=True)
     p.add_argument("--top", type=int, default=20)
+    p.add_argument("--min-obs", type=int, default=None,
+                   help="mínimo de genótipos observados por variante "
+                        "(padrão: metade da coorte)")
     p.add_argument("--saida", required=True)
     args = p.parse_args()
 
@@ -76,40 +131,47 @@ def main() -> None:
         if not m:
             raise SystemExit(f"região inválida: {args.regiao!r} (use crom:ini-fim)")
         cmd += ["--chr", m.group(1), "--from-bp", m.group(2), "--to-bp", m.group(3)]
+    # plink2 nomeia a saída pelos grupos (fst.<A>.<B>.fst.var). Sem limpar, um
+    # contraste ANTERIOR no mesmo diretório seria lido como se fosse este.
+    for fossil in list(saida.glob("fst*.fst.var")) + list(saida.glob("fst*.fst.summary")):
+        fossil.unlink()
     rodar(cmd)
 
     resumo_plink = next(saida.glob("fst*.fst.summary"), None)
     var_plink = next(saida.glob("fst*.fst.var"), None)
+    if resumo_plink is None or var_plink is None:
+        raise SystemExit("plink2 não produziu .fst.summary/.fst.var — ver fst.log")
     fst_global = None
-    if resumo_plink:
-        for linha in resumo_plink.read_text(encoding="utf-8").splitlines()[1:]:
-            campos = linha.split()
-            if len(campos) >= 3:
-                try:
-                    fst_global = float(campos[-1])
-                except ValueError:
-                    pass
-    top_tsv = saida / "fst_top.tsv"
-    n_variantes = 0
-    if var_plink:
-        linhas_var = var_plink.read_text(encoding="utf-8").splitlines()
-        cab, corpo = linhas_var[0], linhas_var[1:]
-        n_variantes = len(corpo)
-        idx_fst = cab.split().index([c for c in cab.split() if "FST" in c.upper()][0])
-
-        def _fst(l: str) -> float:
+    for linha in resumo_plink.read_text(encoding="utf-8").splitlines()[1:]:
+        campos = linha.split()
+        if len(campos) >= 3:
             try:
-                return float(l.split()[idx_fst])
-            except (ValueError, IndexError):
-                return float("-inf")
+                fst_global = float(campos[-1])
+            except ValueError:
+                pass
+    if fst_global is None or not math.isfinite(fst_global):
+        raise SystemExit(f"Fst global ausente ou não finito em {resumo_plink.name}")
 
-        melhores = sorted(corpo, key=_fst, reverse=True)[: args.top]
-        with top_tsv.open("w", encoding="utf-8") as f:
-            f.write("\t".join(cab.split()) + "\n")
-            for l in melhores:
-                f.write("\t".join(l.split()) + "\n")
+    top_tsv = saida / "fst_top.tsv"
+    linhas_var = var_plink.read_text(encoding="utf-8").splitlines()
+    cab, corpo = linhas_var[0], linhas_var[1:]
+    n_variantes = len(corpo)
+    colunas = cab.split()
+    n_coorte = len(usa_a) + len(usa_b)
+    min_obs = args.min_obs if args.min_obs is not None else max(2, math.ceil(0.5 * n_coorte))
+    melhores, n_comparaveis, n_nao_finito, n_sem_obs, n_baixa = top_por_fst(
+        colunas, corpo, args.top, min_obs)
+    if not n_comparaveis:
+        raise SystemExit("nenhuma variante com Fst finito — contraste sem informação útil")
+    with top_tsv.open("w", encoding="utf-8") as f:
+        f.write("\t".join(colunas) + "\n")
+        for l in melhores:
+            f.write("\t".join(l.split()) + "\n")
 
     log(f"Fst global ({nome_a}×{nome_b}, Hudson): {fst_global}; variantes avaliadas: {n_variantes}")
+    log(f"Com Fst finito e OBS_CT≥{min_obs}: {n_comparaveis} — descartadas "
+        f"{n_nao_finito} não finitas (NaN), {n_sem_obs} sem genótipo observado "
+        f"(OBS_CT=0) e {n_baixa} com cobertura abaixo do limiar")
     escrever_resumo(saida, "fst_resumo.json", {
         "arquivo": vcf.name,
         "regiao": args.regiao or "arquivo inteiro",
@@ -118,6 +180,13 @@ def main() -> None:
         "metodo": "Hudson (plink2 --fst report-variants)",
         "fst_global": fst_global,
         "n_variantes": n_variantes,
+        "n_variantes_fst_finito": n_comparaveis,
+        "n_descartadas_nan": n_nao_finito,
+        "n_descartadas_sem_genotipo": n_sem_obs,
+        "n_descartadas_baixa_cobertura": n_baixa,
+        "min_obs_efetivo": min_obs,
+        "nota_top": (f"top ordenado apenas entre variantes com Fst finito e "
+                     f"OBS_CT ≥ {min_obs} (metade da coorte de {n_coorte} amostras)"),
         "top_tsv": str(top_tsv),
     })
 

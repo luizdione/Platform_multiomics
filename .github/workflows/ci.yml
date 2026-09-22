@@ -13,11 +13,58 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Instalar pacote (faixas do pyproject)
-        run: pip install -e ".[test]"
-      - name: Testes (inclui validação de manifests e referências)
-        run: pytest -q
+      # O CI instala o LOCK que as imagens usam (requirements.txt), não as faixas
+      # do pyproject: verde aqui passa a significar "verde com as versões que
+      # rodam no container". As faixas entram só para o extra de teste.
+      - name: Instalar dependências (lock dos containers)
+        run: |
+          pip install -r requirements.txt
+          pip install -e ".[test]"
+      # -ra lista os SKIPPED com motivo. Auditoria de 2026-09-14: os 13 testes
+      # `smoke` — declarados como "critério de entrada de script migrado" — são
+      # pulados aqui por falta de bcftools/SnpEff/R/VEP e o verde do CI não os
+      # cobria; agora pelo menos ficam visíveis no log, com o motivo.
+      - name: Testes (manifests, referências, correções da auditoria)
+        run: pytest -q -ra --strict-markers
         env:
           OMICA_DATA: /tmp/omica_ci
           GENOME_DATA: /tmp
           SKILLS_DIR: /tmp/skills_inexistente
+      # Rede de segurança contra "verde por colapso": um erro de import ou um
+      # conftest quebrado pode fazer a coleta despencar sem falhar o job.
+      - name: Piso de cobertura (o verde não pode vir de suíte vazia)
+        run: |
+          set -o pipefail
+          TOTAL=$(pytest -q --collect-only 2>/dev/null | tail -1 | grep -oE '[0-9]+' | head -1)
+          echo "testes coletados: ${TOTAL:-0}"
+          test "${TOTAL:-0}" -ge 90 || { echo "::error::coleta caiu para ${TOTAL:-0} (piso 90)"; exit 1; }
+        env:
+          OMICA_DATA: /tmp/omica_ci
+          GENOME_DATA: /tmp
+          SKILLS_DIR: /tmp/skills_inexistente
+      # O gate de publicação só é confiável se REPROVAR uma canária. Aqui ele
+      # precisa pegar um segredo plantado — se aprovar, o CI falha.
+      # Canária + controle negativo. Testar só "saiu != 0" não serve: um gate
+      # QUEBRADO (traceback, exit 2) também sai != 0 e passaria por "reprovou".
+      - name: Canária do gate anti-vazamento
+        run: |
+          mkdir -p /tmp/canaria /tmp/limpa
+          printf 'TOKEN = "ghp_%s"\n' "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" > /tmp/canaria/vazou.py
+          set +e
+          SAIDA=$(python -m omica gate /tmp/canaria 2>&1); CODIGO=$?
+          set -e
+          echo "$SAIDA"
+          if [ "$CODIGO" -ne 1 ] || ! echo "$SAIDA" | grep -q "GATE REPROVADO"; then
+            echo "::error::o gate não reprovou a canária como deve (código $CODIGO)"; exit 1
+          fi
+          # controle negativo: árvore limpa PRECISA passar, senão o gate vira
+          # um carimbo de "reprovado" que ninguém usa.
+          printf 'maf = min(af, 1 - af)\n' > /tmp/limpa/analise.py
+          set +e
+          SAIDA_OK=$(python -m omica gate /tmp/limpa 2>&1); CODIGO_OK=$?
+          set -e
+          echo "$SAIDA_OK"
+          if [ "$CODIGO_OK" -ne 0 ]; then
+            echo "::error::o gate reprovou uma árvore limpa (código $CODIGO_OK)"; exit 1
+          fi
+          echo "gate reprova a canária e aprova a árvore limpa"

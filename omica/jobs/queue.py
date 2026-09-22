@@ -219,6 +219,19 @@ def ler_workflow_run(wf_run_id: str) -> Optional[dict[str, Any]]:
     except json.JSONDecodeError:
         return None
     passos = [read_status(j) or {"job_id": j, "status": "queued"} for j in run["jobs"]]
+    # No RQ, o passo cuja dependência falhou fica DEFERIDO para sempre: o
+    # status.json congela em "queued", a UI mostra a cadeia "em andamento" sem
+    # nada rodando e — pior — a guarda de RAM continua somando o mem_gb desse
+    # fantasma, apertando o orçamento de todos os jobs seguintes. O fallback de
+    # thread já marcava esses passos como erro; aqui o RQ passa a fazer o mesmo.
+    ja_falhou = False
+    for passo in passos:
+        if ja_falhou and passo.get("status") == "queued":
+            motivo = "passo anterior da cadeia falhou (dependência cancelada)"
+            write_status(passo["job_id"], "error", error=motivo)
+            passo["status"], passo["error"] = "error", motivo
+        elif passo.get("status") == "error":
+            ja_falhou = True
     estados = [p["status"] for p in passos]
     if "error" in estados:
         agregado = "error"

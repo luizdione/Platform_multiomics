@@ -2,6 +2,153 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [0.8.0] — 2026-09-14 · Auditoria adversarial: correções científicas e validadores que reprovam
+
+Auditoria de 12 dimensões com verificação adversarial por achado (95 achados
+brutos; 21 confirmados + 8 plausíveis; 6 refutados pelos próprios céticos —
+entre eles a suspeita de vazamento de dados no ML, que o código já tratava
+corretamente). Os achados de maior impacto vieram da leitura dos ARTEFATOS
+reais em `E:/data/omica/results`, não só do código.
+
+### Corrigido — ciência (mudam números publicados)
+- **Fst: o "top 20" era lixo.** `float("nan")` não levanta `ValueError`, então a
+  guarda nunca disparava e `sorted` com chaves NaN produzia ordem incoerente:
+  no contraste Angus×Nelore real, 4 das 5 primeiras linhas do top publicado
+  tinham Fst NaN — 29.617 das 122.372 variantes (24%) são NaN, e 28 delas têm
+  `OBS_CT=0` — com o maior Fst real (0,529) só na 5ª linha. Agora o descarte
+  acontece ANTES da ordenação e é contado no resumo, em três baldes separados
+  (não finitas, sem genótipo, cobertura abaixo do limiar). O Fst global (0,283)
+  sempre veio do `.fst.summary` do plink2 e está correto.
+- **Fst, 2ª volta (revisão do próprio patch):** descartar só `OBS_CT==0` removia
+  0,02% das variantes e deixava passar a cauda de cobertura ínfima — o topo
+  passou a ser encabeçado por uma variante com **4 genótipos observados de 497 e
+  Fst = 1,0**, que num manuscrito se lê como fixação completa entre raças. Novo
+  `--min-obs` (padrão: metade da coorte; 249 no caso real), com o limiar efetivo
+  gravado no resumo. Trocar "NaN no topo" por "1,0 espúrio no topo" seria pior
+  que o bug original: o número convence.
+- **Fst lia fóssil de outro contraste**: `glob("fst*.fst.var")` pegava a saída
+  de uma execução anterior (plink2 nomeia o arquivo pelos grupos). Limpeza
+  antes de rodar + erro explícito se o plink2 não produzir saída.
+- **MAF multialélica errada**: `min(AF1, 1-AF1)` ignora AF2..AFn — com ALT1=0,5
+  e ALT2=0,3 o REF vale 0,2 e a MAF é 0,3, não 0,5. E a tabela é ORDENADA por
+  MAF, então esses sítios subiam indevidamente. Nova coluna `N_ALT`.
+- **Metaperfil TSS espelhado na fita −**: o TSS era escolhido certo, mas
+  `d = pos - tss` não invertia o sinal — genes da fita negativa entravam com
+  upstream e downstream trocados, achatando o degrau de metilação no TSS.
+- **Interseção DMC × painel contava a mesma DMC uma vez por janela**: o resumo
+  publicava 320 DMCs "no painel" de um total de 314 (impossível). Janelas de
+  genes vizinhos se sobrepõem (MX1/MX2 no BTA1). `n_dmc_no_painel` agora conta
+  cada DMC uma vez; a atribuição por gene continua (e fica declarada).
+- **DMC declarava BH e rodava SLIM**: `calculateDiffMeth` usa `adjust="SLIM"`
+  por padrão, mas o cabeçalho, o manifest e o resumo sempre disseram BH (como
+  no paper). Agora passa `adjust="BH"` explicitamente.
+- **View "corpo gênico" do MOFA continha o promotor inteiro** nos 108 genes:
+  parte da covariância entre as duas views era a MESMA CpG contada duas vezes.
+  O corpo agora exclui a janela do promotor, respeitando a fita.
+- **R² do MOFA medido em outra escala**: o modelo treina com
+  `scale_views=True`, mas a variância explicada era calculada contra a matriz
+  só centrada. Y passa pela mesma transformação, com sanidade de faixa.
+- **DESeq2 truncava decimais em silêncio**: `storage.mode(x) <- "integer"`
+  desliga a checagem de contagens inteiras do próprio DESeq2 (2,9 → 2). Agora
+  recusa NA/negativo e ARREDONDA declarando quantos valores foram afetados.
+- **Salmon aceitava qualquer taxa de mapeamento**: 2% mapeado virava job verde.
+  Novo `--min-mapeado` (padrão 50%).
+
+### Corrigido — falsos-verdes (validadores que nunca reprovavam)
+- **A checagem de referência quebrada do registry era código morto**: olhava só
+  `cmd.split()[0]`, que é sempre `python3`/`Rscript` e nunca termina em
+  `.py`/`.R`/`.sh`. Um manifest podia apontar para script apagado, carregar
+  limpo e o doctor dizer "4 módulos válidos" — a falha só apareceria no worker.
+- **Job virava `done` só por returncode 0**: o `RESULTADO: <path>` anunciado não
+  era conferido. Agora o executor exige que o artefato exista e não esteja
+  vazio, e registra aviso quando o script não declara resultado nenhum.
+- **`integridade_vcf` nunca exercitava o índice**: checava só a existência do
+  `.tbi`/`.csi` (e `bcftools view -H` lê sequencialmente). Agora confere se o
+  índice é mais novo que o dado e se o bcftools consegue usá-lo.
+- **HOMER sem `knownResults.txt` concluía com tabela vazia** — que se lê como
+  "nenhum motif enriquecido". Agora falha. E o `aviso_didatico`, que era texto
+  fixo afirmando "1 DMC estrita" enquanto o `dmc_resumo.json` do mesmo dado
+  reportava 314, passou a ser gerado a partir do dado.
+- **Tabela de resultado vazia era exibida como "0 linhas"**: arquivo truncado
+  agora é ausência de dado (`None`), e header-só vem com `vazia: true`.
+- **A suíte não era hermética**: lia a RAM REAL da máquina — 4 testes de fila
+  quebravam quando havia outro job pesado rodando, e o verde do CI só
+  significava "o runner estava vazio". `conftest` fixa a memória; os testes da
+  guarda continuam monkeypatchando e agora valem de verdade.
+
+### Adicionado — selo de workflow com lastro
+- `WorkflowSpec.hash_scripts` + `registry.hash_dos_passos/selos_vencidos` e
+  checagem no doctor. O selo "testado de ponta a ponta" era texto livre que
+  sobrevivia à reescrita do próprio script que certifica. Os 5 selos foram
+  carimbados com o hash do commit efetivamente testado (11a9a7a) — e, como
+  esta versão mudou scripts de 4 deles, **o diagnóstico já acusa esses 4 como
+  vencidos: os números publicados por eles ainda são os da versão anterior e
+  os workflows precisam ser re-executados.**
+
+### Adicionado — segurança e diagnóstico
+- **Gate de publicação era cego a credenciais** (provado com canária: token do
+  GitHub, chave AWS, `sk-ant-`, chave privada SSH e senha em `.ini` passavam
+  APROVADOS). Novos `BLOCK_SECRET` e `NOME_CREDENCIAL`; formatos de redação
+  (.tex/.ipynb/.Rmd/.bib/.html) entraram na varredura, e o que fica fora dela
+  agora é declarado como `[nao-lido]` em vez de aprovado em silêncio.
+- **doctor**: porta 8710 exige a assinatura do `/saude` da ômica (antes,
+  qualquer processo na porta dava OK); referências pesadas são checadas pelo
+  CONTEÚDO (cache VEP com `110_*`, `info.json` do Salmon,
+  `snpEffectPredictor.bin`, VCFs, listas de raça) e não pela pasta-pai; worker
+  RQ exige heartbeat recente (registro órfão no Redis não conta mais); e
+  `--fix-soft` ABORTA se houver job em andamento, em vez de reiniciar os
+  containers por cima de uma análise de horas.
+- **Versão com fonte única**: `pyproject.toml` fossilizara em 0.1.0 enquanto
+  `VERSION` e a tag estavam em 0.7.0; agora a versão é dinâmica a partir de
+  `VERSION`, com teste que impede a volta do literal.
+- **CI**: instala o LOCK dos containers (`requirements.txt`), lista os SKIPPED
+  com motivo (os 13 smokes de container nunca rodaram aqui), tem piso de
+  cobertura contra "verde por suíte vazia" e uma canária que falha o job se o
+  gate aprovar uma árvore com credencial.
+
+### Revisado — auditoria adversarial DO PRÓPRIO PATCH (8 lentes, 36 apontamentos)
+Antes de commitar, o patch acima passou por uma segunda rodada adversarial: 12
+problemas confirmados, 10 refutados pelos céticos. O que entrou por causa dela:
+- o limiar de cobertura do Fst (acima) — o achado mais grave da rodada;
+- **alelo `*` (spanning deletion)** deixou de contar como alelo do sítio na MAF;
+- **o gate bloqueava o padrão CORRETO de manejo de segredo**
+  (`api_key = os.environ[...]`, `getenv(...)`, `cfg.get(...)`) e casava
+  `mask-<md5>` como chave da OpenAI; a regra genérica também tinha retrocesso
+  quadrático. Um gate que pune quem faz certo é desligado pelo usuário;
+- **o selo vencido não chegava à UI**: a vitrine do Professor exibia ✅ só por
+  existir `testado_em`. Agora marca "Selo VENCIDO" e diz que os números são da
+  versão anterior;
+- **o hash do selo era cego ao `_comum.py`** (importado por todos os passos) e
+  aos parâmetros científicos do `cmd` — trocar `--qvalue` no manifest mudava o
+  resultado sem invalidar o selo;
+- **`python -m omica selos [--gravar]`**, comando que o doctor e o CHANGELOG já
+  citavam e que não existia (`omica/selos.py`);
+- **frescor dos resultados** no doctor: o selo só cobre workflows, e scripts
+  avulsos (perfil_tss, motifs_homer) publicavam resultado velho sem aviso —
+  hoje o diagnóstico acusa 11 deles;
+- **a porta** deixou de gritar "outro serviço" durante o startup (o Docker
+  publica a porta antes de o uvicorn aceitar) e o **`--fix-soft`** deixou de
+  criar impasse permanente com `status.json` órfão;
+- **cadeia no RQ**: o passo dependente de um passo que falhou ficava `queued`
+  para sempre — a UI mostrava a cadeia viva sem nada rodando e a guarda de RAM
+  seguia somando o `mem_gb` do fantasma;
+- **testes fracos meus**: o da correção do MOFA era um grep no código-fonte
+  (passaria com os ramos das fitas trocados) e o do smoke declarava BH com
+  `startswith("BH")` — que a string do bug, `"BH (methylKit/SLIM)"`, satisfazia.
+  A canária do gate no CI tratava qualquer saída ≠ 0 como sucesso, então um gate
+  QUEBRADO passaria por "reprovou": agora exige código 1 e a mensagem certa,
+  mais um controle negativo com árvore limpa.
+
+### Testes
+- `tests/test_correcoes_auditoria.py` (novo): cada correção tem um teste que
+  REPROVA a versão anterior, e cada gate tem canária + controle negativo —
+  inclusive as duas canárias que a revisão exigiu (a variante de cobertura
+  ínfima no Fst e o `min_obs` permissivo que precisa deixá-la em 1º para provar
+  que a canária morde). Os smokes de container deixaram de comparar zero com
+  zero e de conferir número vindo do painel em vez do dado.
+- Suíte: **99 passed, 12 skipped** (era 46 passed / 4 failed / 12 skipped —
+  e os 4 vermelhos eram a RAM da máquina, não o código).
+
 ## [0.7.0] — 2026-09-04 · Backlog zerado: robustez ML + HOMER + MOFA
 
 ### Adicionado — robustez ML (A1/A2/A3, herdada do thermalcore)

@@ -21,6 +21,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("reindex", help="regenera o índice das skills")
     p_gate = sub.add_parser("gate", help="gate anti-vazamento p/ repositório de cálculo")
     p_gate.add_argument("diretorio", help="árvore a auditar (repo de exportação)")
+    p_selos = sub.add_parser(
+        "selos", help="confere (ou regrava) o hash dos workflows selados")
+    p_selos.add_argument(
+        "--gravar", action="store_true",
+        help="regrava hash_scripts nos manifests — use SÓ depois de re-executar "
+             "o workflow de verdade; o selo afirma que o E2E rodou")
     sub.add_parser("versao", help="imprime a versão")
     args = parser.parse_args(argv)
 
@@ -44,6 +50,10 @@ def main(argv: list[str] | None = None) -> int:
         from omica.publish.gate import main as gate_main
 
         return gate_main(args.diretorio)
+    if args.comando == "selos":
+        from omica.selos import main as selos_main
+
+        return selos_main(gravar=args.gravar)
     if args.comando == "versao":
         from omica import __version__
 

@@ -57,7 +57,13 @@ def test_smoke_extracao_e_frequencias(tmp_path):
     assert resumo_f["n_variantes_com_af"] > 1000
     assert 0.0 < resumo_f["maf_media"] < 0.5
     cabecalho = (saida_freq / "frequencias.tsv").open(encoding="utf-8").readline()
-    assert cabecalho.strip() == "CHROM\tPOS\tID\tREF\tALT\tAF\tMAF"
+    assert cabecalho.strip() == "CHROM\tPOS\tID\tREF\tALT\tAF\tMAF\tN_ALT"
+    # MAF é frequência do 2º alelo mais comum: nunca pode passar de 0,5, nem em
+    # sítio multialélico (era exatamente aí que a fórmula antiga errava).
+    linhas = (saida_freq / "frequencias.tsv").read_text(encoding="utf-8").splitlines()[1:]
+    mafs = [float(l.split("\t")[6]) for l in linhas]
+    assert mafs and all(0.0 <= v <= 0.5 + 1e-9 for v in mafs), "MAF fora de [0; 0,5]"
+    assert "n_multialelicos" in resumo_f
 
 
 @pytest.mark.smoke

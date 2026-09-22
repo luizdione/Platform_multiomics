@@ -32,6 +32,16 @@ bruto <- read.delim(counts_path, check.names = FALSE)
 coldata <- read.delim(coldata_path, check.names = FALSE)
 stopifnot(all(c("amostra", "condicao") %in% colnames(coldata)))
 contagens <- as.matrix(bruto[, coldata$amostra])
+# DESeq2 exige contagens INTEIRAS e recusa decimais com erro. storage.mode()
+# TRUNCA em silêncio (2.9 -> 2), o que desliga essa proteção: uma matriz de
+# NumReads do Salmon passaria adiante com ~0,5 contagem perdida por gene.
+if (any(!is.finite(contagens))) stop("matriz de contagens com NA/Inf")
+if (any(contagens < 0)) stop("matriz com valores negativos — não são contagens")
+nao_inteiros <- sum(abs(contagens - round(contagens)) > 1e-8)
+if (nao_inteiros > 0)
+  cat(sprintf("AVISO: %d valores não inteiros (ex.: NumReads do Salmon) ARREDONDADOS\n",
+              nao_inteiros))
+contagens <- round(contagens)
 storage.mode(contagens) <- "integer"
 rownames(contagens) <- bruto$gene_id
 coldata$condicao <- relevel(factor(coldata$condicao), ref = referencia)

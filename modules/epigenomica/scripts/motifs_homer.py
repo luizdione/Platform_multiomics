@@ -66,29 +66,45 @@ def main() -> None:
            "-preparsedDir", args.preparsed])
 
     conhecidos = homer_out / "knownResults.txt"
+    # Falso-done: sem este arquivo, o script escrevia uma tabela só com cabeçalho,
+    # marcava o job como concluído e o HTML linkado no resumo nem existia — e uma
+    # tabela vazia se lê como "nenhum motif enriquecido", que é outra afirmação.
+    if not conhecidos.exists():
+        raise SystemExit(
+            f"HOMER não produziu {conhecidos.name} — ver o log acima "
+            "(genoma/preparsedDir? regiões demais? BED vazio?)")
     top = []
-    if conhecidos.exists():
-        with conhecidos.open(encoding="utf-8", errors="replace") as f:
-            leitor = csv.reader(f, delimiter="\t")
-            cab = next(leitor)
-            for linha in leitor:
-                if len(linha) >= 5:
-                    top.append((linha[0].split("/")[0], linha[2], linha[4]))
-                if len(top) >= 15:
-                    break
+    with conhecidos.open(encoding="utf-8", errors="replace") as f:
+        leitor = csv.reader(f, delimiter="\t")
+        next(leitor)  # cabeçalho do HOMER
+        for linha in leitor:
+            if len(linha) >= 5:
+                top.append((linha[0].split("/")[0], linha[2], linha[4]))
+            if len(top) >= 15:
+                break
+    if not top:
+        raise SystemExit(f"{conhecidos.name} sem nenhuma linha ranqueável — resultado inutilizável")
     tsv = saida / "motifs_top.tsv"
     with tsv.open("w", encoding="utf-8") as f:
         f.write("MOTIF\tP_VALUE\tQ_VALUE\n")
         for nome, pval, qval in top:
             f.write(f"{nome}\t{pval}\t{qval}\n")
-    log(f"Motifs conhecidos ranqueados: {len(top)} (top: {top[0][0] if top else '—'})")
+    log(f"Motifs conhecidos ranqueados: {len(top)} (top: {top[0][0]})")
 
     escrever_resumo(saida, "motifs_resumo.json", {
         "criterio_selecao": f"q<{args.q_max}, top {args.top_n} por |meth.diff|, flanco ±{args.flanco} pb",
-        "aviso_didatico": "limiar relaxado para o DEMO (1 DMC estrita no CD4) — exploratório",
+        # Esta nota era um texto FIXO que afirmava "1 DMC estrita no CD4" enquanto o
+        # dmc_resumo.json do mesmo dado reportava 314 DMCs: número cravado à mão
+        # dentro de um arquivo de RESULTADO (anti-lição nº 4). Agora sai do dado.
+        "aviso_didatico": (
+            f"seleção exploratória: q<{args.q_max} (mais frouxo que o corte de DMC), "
+            f"{len(selecao)} regiões de {len(candidatas)} candidatas "
+            f"entre {len(linhas)} CpGs testadas"),
+        "n_cpgs_testadas": len(linhas),
+        "n_candidatas_q": len(candidatas),
         "n_regioes": len(selecao),
         "genoma": args.genoma,
-        "motif_top": top[0][0] if top else None,
+        "motif_top": top[0][0],
         "tabela_tsv": str(tsv),
         "relatorio_html": str(homer_out / "knownResults.html"),
     })

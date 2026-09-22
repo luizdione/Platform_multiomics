@@ -58,7 +58,15 @@
       {{ item.modulo_nome }} · {{ item.wf.passos | length }} {{ t('passos', lang) }}:
       {% for p in item.wf.passos %}<code>{{ p }}</code>{% if not loop.last %} → {% endif %}{% endfor %}
     </p>
+    {# O ✅ só vale enquanto os scripts forem os mesmos que rodaram no E2E: sem
+       isto o selo é enfeite, e o número antigo é lido como resultado corrente. #}
+    {% if item.vencido %}
+    <p class="meta">⚠️ Selo VENCIDO ({{ item.motivo_vencido }}) — rodou em
+      {{ item.wf.testado_em }}, mas o código mudou desde então. Os números deste
+      workflow são da versão anterior: re-execute antes de citá-los.</p>
+    {% else %}
     <p class="meta">✅ {{ t('testado_em', lang) }} {{ item.wf.testado_em }}{% if item.wf.testado_por %} — {{ item.wf.testado_por }}{% endif %}</p>
+    {% endif %}
     {% if item.wf.nota_didatica %}<p class="meta">📘 {{ item.wf.nota_didatica }}</p>{% endif %}
     <form method="post" action="/modulos/{{ item.modulo }}/workflows/{{ item.wf.id }}">
       <button type="submit">{{ t('rodar', lang) }} workflow</button>

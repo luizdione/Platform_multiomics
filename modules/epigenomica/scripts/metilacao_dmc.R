@@ -43,7 +43,9 @@ unido <- methylKit::unite(obj, destrand = FALSE)
 cat(sprintf("CpGs cobertos (>=%dx) em TODAS as amostras: %d\n", min_cov, nrow(unido)))
 if (nrow(unido) == 0) stop("nenhum CpG comum às amostras com essa cobertura")
 
-dif <- calculateDiffMeth(unido, mc.cores = 1)
+# methylKit usa adjust="SLIM" por PADRÃO. O cabeçalho, o manifest e o resumo
+# sempre declararam BH (como no paper) — agora o código faz o que declara.
+dif <- calculateDiffMeth(unido, adjust = "BH", mc.cores = 1)
 dmc <- getMethylDiff(dif, difference = diff_pct, qvalue = q_corte)
 tab <- getData(dmc)
 cat(sprintf("DMCs (|diff|>%.0f%%, q<%.2g): %d — hiper: %d, hipo: %d\n",
@@ -63,7 +65,7 @@ writeLines(toJSON(list(
   gerado_em = format(Sys.time(), "%Y-%m-%dT%H:%M:%S"),
   grupo_a = list(nome = grupo_a, n = length(arq_a)),
   grupo_b = list(nome = grupo_b, n = length(arq_b)),
-  criterios = list(min_cov = min_cov, diff_pct = diff_pct, qvalue = q_corte, correcao = "BH (methylKit/SLIM)"),
+  criterios = list(min_cov = min_cov, diff_pct = diff_pct, qvalue = q_corte, correcao = "BH (Benjamini-Hochberg; methylKit adjust=\"BH\")"),
   n_cpg_testados = nrow(unido),
   n_dmc = nrow(tab),
   n_hiper_no_grupo_a = sum(tab$meth.diff > 0),

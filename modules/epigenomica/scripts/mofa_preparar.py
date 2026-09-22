@@ -24,6 +24,35 @@ from pathlib import Path
 from _comum import escrever_resumo, log
 
 
+def regioes_do_painel(genes: dict, promotor: int) -> tuple[list[tuple], list[str]]:
+    """Regiões (crom, ini, fim, gene, view) das duas views, DISJUNTAS por gene.
+
+    Auditoria de 2026-09-14: a view "corpo gênico" era o gene inteiro, promotor
+    incluído — nos 108 genes do painel, parte da covariância entre as duas views
+    era a MESMA CpG contada duas vezes, e o MOFA lia isso como sinal
+    compartilhado. O corpo agora começa depois da janela do promotor, e do lado
+    certo: na fita − o TSS é o FIM do gene, então o corpo é o que vem ANTES dele.
+
+    Devolve também os genes curtos demais para sobrar corpo fora do promotor.
+    """
+    regioes: list[tuple] = []
+    sem_corpo: list[str] = []
+    for simbolo, g in genes.items():
+        crom = str(g["cromossomo"])
+        fita = 1 if g["fita"] >= 0 else -1
+        tss = g["inicio"] if fita > 0 else g["fim"]
+        regioes.append((crom, tss - promotor, tss + promotor, simbolo, "promotor"))
+        if fita > 0:
+            ini_corpo, fim_corpo = tss + promotor + 1, g["fim"]
+        else:
+            ini_corpo, fim_corpo = g["inicio"], tss - promotor - 1
+        if fim_corpo > ini_corpo:
+            regioes.append((crom, ini_corpo, fim_corpo, simbolo, "corpo"))
+        else:
+            sem_corpo.append(simbolo)  # gene mais curto que a janela do promotor
+    return regioes, sem_corpo
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Views promotor×corpo p/ MOFA (painel 108)")
     p.add_argument("--dir", required=True)
@@ -37,12 +66,7 @@ def main() -> None:
     saida.mkdir(parents=True, exist_ok=True)
     genes = json.loads(Path(args.painel).read_text(encoding="utf-8"))["genes"]
 
-    regioes = []  # (crom, ini, fim, gene, view)
-    for simbolo, g in genes.items():
-        crom = str(g["cromossomo"])
-        tss = g["inicio"] if g["fita"] >= 0 else g["fim"]
-        regioes.append((crom, tss - args.promotor, tss + args.promotor, simbolo, "promotor"))
-        regioes.append((crom, g["inicio"], g["fim"], simbolo, "corpo"))
+    regioes, sem_corpo = regioes_do_painel(genes, args.promotor)
     por_crom: dict[str, list] = defaultdict(list)
     for r in regioes:
         por_crom[r[0]].append(r)
@@ -98,6 +122,10 @@ def main() -> None:
         "desenho": "views promotor × corpo gênico (painel 108) — pareamento real por amostra",
         "nota": "com animais WGS+RRBS pareados, a 2ª view vira genótipos (fluxo idêntico)",
         "n_amostras": len(amostras),
+        "promotor_pb": args.promotor,
+        "n_genes_sem_corpo": len(sem_corpo),
+        "genes_sem_corpo": sorted(sem_corpo)[:20],
+        "nota_views": "views disjuntas: corpo gênico exclui a janela do promotor",
         "genes_por_view": resumo_views,
         "views": {v: str(saida / f'view_{v}.tsv') for v in resumo_views},
         "grupos_tsv": str(grupos),

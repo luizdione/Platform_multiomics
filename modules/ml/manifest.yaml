@@ -114,6 +114,7 @@ workflows:
     passos: [ml_dataset_demo, ml_classificar_demo]
     testado_em: "2026-09-03"
     testado_por: "Claude (filas bioinfo→ml encadeadas; 497 amostras reais, bal.acc 0,948)"
+    hash_scripts: "b3c5336d1e0eb1fb"
     nota_didatica: >-
       O mesmo desenho do paper de AIMs do autor: o painel mínimo é escolhido
       dentro de cada fold de treino, nunca olhando o conjunto todo — é assim que

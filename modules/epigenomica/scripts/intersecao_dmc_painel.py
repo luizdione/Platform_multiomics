@@ -51,11 +51,17 @@ def main() -> None:
         n_dmc_total += 1
         crom, pos = campos[i_chr], int(campos[i_start])
         diff = float(campos[i_diff])
+        # As janelas do painel SE SOBREPÕEM (ex.: MX1/MX2 no BTA1). Contar dentro
+        # do laço fazia a mesma DMC somar 1 por janela — e o resumo publicava mais
+        # DMCs "no painel" (320) do que DMCs no total (314).
+        em_painel = False
         for ini, fim, gene in janelas.get(crom, ()):
             if ini <= pos <= fim:
-                n_em_painel += 1
+                em_painel = True
                 contagem[gene]["n_dmc"] += 1
                 contagem[gene]["hiper" if diff > 0 else "hipo"] += 1
+        if em_painel:
+            n_em_painel += 1
 
     tsv = saida / "intersecao.tsv"
     with tsv.open("w", encoding="utf-8") as f:
@@ -70,6 +76,9 @@ def main() -> None:
         "n_genes_painel": n_genes,
         "n_dmc_total": n_dmc_total,
         "n_dmc_no_painel": n_em_painel,
+        "n_atribuicoes_gene": sum(c["n_dmc"] for c in contagem.values()),
+        "nota_contagem": "n_dmc_no_painel conta cada DMC UMA vez; n_atribuicoes_gene "
+                         "pode ser maior porque janelas de genes vizinhos se sobrepõem",
         "n_genes_com_dmc": len(contagem),
         "gene_top": max(contagem, key=lambda g: contagem[g]["n_dmc"]) if contagem else None,
         "tabela_tsv": str(tsv),
