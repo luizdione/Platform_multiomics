@@ -53,7 +53,7 @@ Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê da
   `results_spec`) validado por schema no boot. Manifest inválido → módulo não
   carrega e o erro aparece em `/saude` e no doctor.
 
-## Biblioteca de skills e plugin Bioinfo (v0.9)
+## Biblioteca de skills e plugin Bioinfo (v1.0)
 
 A aba **/skills** e o plugin **Bioinfo** (`C:\github\bioinfo-plugin`, o roteador das
 mesmas 815 skills no assistente de código) deixaram de ser duas ilhas:
@@ -112,7 +112,7 @@ modules/<id>/manifest.yaml: skills_dominios ──► "skills relacionadas" no m
 | 5 | ML (nested CV+SHAP+painel mínimo, **bal.acc 0,948** Angus×Nelore real — XGBoost com o painel COMPLETO de 311 variantes; o painel mínimo de 50 dá 0,939), **/skills** (815 offline), doctor v2 + /diagnostico, glossário fundido (40 termos), **modo aula** executável, gate de publicação | ✅ 0.6.0 |
 | — | Backlog do plano: HOMER (motifs), MOFA2 (promotor × corpo), robustez ML A1/A2/A3 | ✅ 0.7.0 |
 | — | **Auditoria adversarial** (12 dimensões, 95 achados) → correções científicas, selo com lastro, gate de credenciais | ✅ 0.8.0 |
-| — | **Ponte com o plugin Bioinfo**: busca PT/EN em /skills (servidor), guias de domínio, elo módulo→domínio no manifest, Professor aponta a biblioteca quando o catálogo não cobre | ✅ 0.9.0 |
+| — | **Ponte com o plugin Bioinfo**: busca PT/EN em /skills (servidor), guias de domínio, elo módulo→domínio no manifest, Professor aponta a biblioteca quando o catálogo não cobre | ✅ 1.0.0 |
 
 **Plano de 2026-09-01: fases 0–5 e backlog completos.** Pendência declarada com
 motivo no manifest: nf-core DinD (o acervo legado de 34 amostras é reaproveitado).

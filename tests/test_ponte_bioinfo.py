@@ -99,7 +99,7 @@ def test_limite_corta_sem_mentir_o_total():
 
 
 def test_frase_longa_e_cortada_no_teto_sem_travar():
-    """Achado da revisão da 0.9.0: um trecho de Métodos colado no Professor (centenas de
+    """Achado da revisão da 1.0.0: um trecho de Métodos colado no Professor (centenas de
     siglas) levava 40–80 s — um regex recompilado por termo × skill — e, na rota do
     Professor, parava o servidor inteiro. O teto é o mesmo do plugin (busca gêmea)."""
     import itertools

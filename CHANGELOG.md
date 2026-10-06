@@ -2,7 +2,10 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
-## [0.9.0] — 2026-10-05 · Ponte com o plugin Bioinfo: a biblioteca de skills passa a responder em português
+## [1.0.0] — 2026-10-06 · Ponte com o plugin Bioinfo: a biblioteca de skills passa a responder em português
+
+Numerada 1.0 pelo autor na publicação (era 0.9.0 nos commits `b9d3493`…`833b47f`):
+primeira versão com os 5 workflows selados válidos depois da auditoria.
 
 A plataforma e o plugin Bioinfo (roteador das mesmas 815 skills no assistente de
 código) indexavam a MESMA biblioteca sem se conhecer. O defeito que os dois
