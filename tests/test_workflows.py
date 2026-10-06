@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from omica.jobs import queue
-from omica.registry import load_registry
+from omica.registry import hash_dos_passos, load_registry
 
 
 def test_wf_painel_demo_valido_e_selado():
@@ -14,7 +14,9 @@ def test_wf_painel_demo_valido_e_selado():
     gen = reg.por_id("genomica")
     wf = next(w for w in gen.workflows if w.id == "wf_painel_demo")
     assert wf.passos == ["extracao_demo", "frequencias_demo", "anotacao_demo"]
-    assert wf.testado_em == "2026-09-02"  # selo só existe porque rodou de verdade
+    # selo só existe porque rodou de verdade: tem data e o hash dos scripts bate com o
+    # atual (a data em si muda a cada re-execução — 05/10/2026 recarimbou os selos)
+    assert wf.testado_em and wf.hash_scripts == hash_dos_passos(gen, wf)
 
 
 def test_workflow_sem_encadeamento_e_rejeitado(tmp_path):

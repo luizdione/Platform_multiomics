@@ -1,6 +1,8 @@
 """Professor Ômico: catálogo fiel ao registry, validação de plano contra o
 catálogo (LLM nunca executa nada fora dele) e parsing robusto da resposta.
 Nenhum teste chama o Ollama — o motor é opcional por contrato."""
+import re
+
 import pytest
 
 from omica import professor
@@ -10,7 +12,9 @@ def test_catalogo_contem_workflow_selado():
     cat = professor.catalogo()
     gen = next(m for m in cat["modulos"] if m["modulo"] == "genomica")
     wf = next(w for w in gen["workflows"] if w["id"] == "wf_painel_demo")
-    assert wf["testado_em"] == "2026-09-02"
+    # a data muda a cada re-execução legítima (05/10/2026 recarimbou os selos); o que
+    # importa é o selo existir com forma de data
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", wf["testado_em"])
     assert {s["id"] for s in gen["scripts"]} >= {"extracao_demo", "fst_racas"}
 
 
