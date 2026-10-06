@@ -15,6 +15,10 @@ descricao_pt: >-
 descricao_en: >-
   Comparative methylation (RRBS/WGBS) indicine × taurine: DMCs (methylKit),
   intersection with the versioned 108-gene panel, TSS metaprofiles; HOMER/MOFA2 next.
+# Domínios da biblioteca de skills que este módulo cobre (elo com /skills e com o
+# plugin Bioinfo): quem procura receita nesses domínios é avisado de que há análise
+# pronta aqui.
+skills_dominios: [epigenomics, multiomics]
 fases:
   - id: epi_fase1
     nome: Fase 1 · Metilação diferencial

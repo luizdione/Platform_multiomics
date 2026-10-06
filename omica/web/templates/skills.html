@@ -6,21 +6,38 @@
 <p class="meta">{{ indice.total }} skills · {{ indice.dominios | length }} {{ t('dominios', lang) }} · {{ t('gerado_em', lang) }} {{ indice.gerado_em }}</p>
 
 <section class="fase">
-  <input id="busca" type="text" style="width:100%;padding:.5rem" placeholder="{{ t('skills_busca', lang) }}">
+  <input id="busca" type="text" style="width:100%;padding:.5rem" value="{{ q }}" placeholder="{{ t('skills_busca', lang) }}">
   <p class="meta" style="margin-top:.5rem">
     <select id="dominio">
       <option value="">{{ t('todos_dominios', lang) }}</option>
-      {% for d, n in indice.dominios.items() %}<option value="{{ d }}">{{ d }} ({{ n }})</option>{% endfor %}
+      {% for d, n in indice.dominios.items() %}<option value="{{ d }}"{% if d == dominio %} selected{% endif %}>{{ d }} ({{ n }})</option>{% endfor %}
     </select>
     <span id="contagem"></span>
   </p>
+  {# o que a busca fez com a frase: tradução aplicada, palavras ignoradas, modo parcial #}
+  <p class="meta" id="relato"></p>
+  {% if not tem_glossario %}<p class="alerta">⚠️ {{ t('skills_sem_glossario', lang) }}</p>{% endif %}
 </section>
+
+{# cards do domínio escolhido: quando usar, regras duras e stack (vêm do índice) #}
+<section id="cards" class="fase" style="padding-top:.2rem;padding-bottom:.2rem"></section>
 
 <table>
   <thead><tr><th>Skill</th><th>{{ t('dominio', lang) }}</th><th>{{ t('descricao', lang) }}</th><th>Stack</th></tr></thead>
   <tbody id="linhas"></tbody>
 </table>
+<p class="meta">{{ t('skills_plugin', lang) }}</p>
 
-<script id="dados-skills" type="application/json">{{ skills_json | safe }}</script>
-<script src="/static/skills.js"></script>
+<script id="textos-skills" type="application/json">{{ {
+  "skills": t('skills_n', lang), "mostrando": t('skills_mostrando', lang),
+  "traducao": t('skills_traducao', lang), "ignorado": t('skills_ignorado', lang),
+  "parcial": t('skills_parcial', lang), "sem_casar": t('skills_sem_casar', lang),
+  "truncado": t('skills_truncado', lang),
+  "casou": t('skills_casou', lang), "erro": t('skills_erro', lang),
+  "quando": t('card_quando', lang), "regras": t('card_regras', lang),
+  "guias": t('card_guias', lang)
+} | tojson }}</script>
+{# ?v= fura o cache do navegador a cada versão: este JS mudou de contrato com a página
+   (antes lia o índice embutido) e a cópia antiga em cache deixaria a tabela vazia #}
+<script src="/static/skills.js?v={{ versao }}"></script>
 {% endblock %}

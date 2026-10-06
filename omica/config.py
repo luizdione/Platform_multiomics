@@ -27,6 +27,10 @@ _DEFAULTS = {
     # crítico — o LLM só PROPÕE planos do catálogo; a execução é determinística.
     "OMICA_OLLAMA_URL": "http://host.docker.internal:11434" if os.environ.get("OMICA_IN_DOCKER") else "http://localhost:11434",
     "OMICA_OLLAMA_MODEL": "qwen3:14b",
+    # Plugin Bioinfo: roteia as MESMAS 815 skills no assistente de código do autor e é a
+    # fonte única do glossário de busca PT→EN. Só o host o enxerga (não é montado nos
+    # containers): lá fica vazio e a plataforma usa a cópia que o reindex deixou em data/.
+    "BIOINFO_PLUGIN_DIR": "" if os.environ.get("OMICA_IN_DOCKER") else r"C:\github\bioinfo-plugin",
 }
 
 
@@ -61,6 +65,7 @@ class Config:
     lang: str
     ollama_url: str         # motor do Professor Ômico (Ollama local, mesmo do LILO)
     ollama_model: str
+    plugin_dir: Path | None  # plugin Bioinfo no host; None onde ele não existe (container, CI)
     in_docker: bool = field(default_factory=lambda: bool(os.environ.get("OMICA_IN_DOCKER")))
 
     @property
@@ -102,6 +107,7 @@ def get_config() -> Config:
         lang=_obter("OMICA_LANG", dotenv),
         ollama_url=_obter("OMICA_OLLAMA_URL", dotenv),
         ollama_model=_obter("OMICA_OLLAMA_MODEL", dotenv),
+        plugin_dir=Path(plugin) if (plugin := _obter("BIOINFO_PLUGIN_DIR", dotenv)) else None,
     )
 
 

@@ -15,6 +15,10 @@ descricao_en: >-
   Nested-CV classification (RF/XGBoost), balanced metrics, SHAP and
   leakage-free minimal panels — inherited from the AIM paper pipeline,
   applicable to any marker matrix.
+# Domínios da biblioteca de skills que este módulo cobre (elo com /skills e com o
+# plugin Bioinfo): quem procura receita nesses domínios é avisado de que há análise
+# pronta aqui.
+skills_dominios: [stats-ml]
 fases:
   - id: ml_fase1
     nome: Fase 1 · Dataset

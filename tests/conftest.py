@@ -32,6 +32,8 @@ def ambiente_isolado(tmp_path, monkeypatch):
     monkeypatch.setenv("OMICA_REDIS_URL", "")
     monkeypatch.setenv("OMICA_MAX_RAM_GB", "24")
     monkeypatch.setenv("OMICA_RAM_MAX_PCT", "80")
+    # sem isto, na máquina do autor a suíte leria o plugin Bioinfo de verdade
+    monkeypatch.setenv("BIOINFO_PLUGIN_DIR", str(tmp_path / "sem_plugin"))
     monkeypatch.delenv("OMICA_IN_DOCKER", raising=False)
     monkeypatch.setattr(guarda_ram.psutil, "virtual_memory", lambda: _MemoriaFake(12.0))
     reset_config_cache()

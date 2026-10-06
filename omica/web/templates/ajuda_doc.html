@@ -1,8 +1,25 @@
 {% extends "base.html" %}
 {% block titulo %}ômica — {{ doc }}{% endblock %}
 {% block conteudo %}
+{% if skill %}
+{# skill da biblioteca: de que domínio é, e se a plataforma já tem análise pronta nele #}
+<a class="voltar" href="/skills?dominio={{ skill.dominio }}&lang={{ lang }}">{{ t('voltar', lang) }}</a>
+<section class="fase">
+  <p class="meta"><code>{{ skill.id }}</code> · {{ t('dominio', lang) }}
+    <a href="/skills?dominio={{ skill.dominio }}&lang={{ lang }}"><code>{{ skill.dominio }}</code></a> ·
+    {{ t('origem', lang) }} <code>{{ skill.origem }}</code>{% if skill.stack %} ·
+    {% for x in skill.stack %}<code>{{ x }}</code> {% endfor %}{% endif %}</p>
+  {% for m in modulos_skill %}
+  <p class="alerta" style="background:#e6fffa;border-color:#0f766e">{{ m.icone }} {{ t('skill_modulo', lang) }}
+    <a href="/modulos/{{ m.id }}?lang={{ lang }}">{{ m.nome_pt if lang == 'pt' else m.nome_en }}</a>.</p>
+  {% endfor %}
+  <p class="meta">{{ t('skills_plugin', lang) }}</p>
+</section>
+{% else %}
 <a class="voltar" href="/ajuda?lang={{ lang }}">{{ t('voltar', lang) }}</a>
+{% endif %}
 <article class="doc">
+  {% if skill_descricao %}<p><em>{{ skill_descricao }}</em></p>{% endif %}
   {{ corpo | safe }}
 </article>
 

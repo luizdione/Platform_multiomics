@@ -1,5 +1,5 @@
 {
- "gerado_em": "2026-09-02T07:26:19",
+ "gerado_em": "2026-10-05T18:37:55",
  "total": 815,
  "dominios": {
   "assembly-phylo": 39,
@@ -21,6 +21,376 @@
   "viz-report": 34,
   "workflows-misc": 56,
   "writing": 24
+ },
+ "cards": {
+  "assembly-phylo": [
+   {
+    "titulo": "Montagem e anotação de genomas (bacteriano e eucariótico)",
+    "quando": "Quando o usuário pedir para montar um genoma a partir de reads (Illumina/ONT/PacBio HiFi/metagenoma), avaliar QC de montagem, ou anotar genes/ncRNA/elementos repetitivos em um genoma bacteriano, arqueal ou eucariótico.",
+    "regras": "Rodar QC de montagem (BUSCO completude + Merqury QV + contiguidade N50/NGx, CheckM2 para contaminação) antes de anotar; para procariotos usar Bakta como padrão atual (Prokka só para reproduzir pipeline legado), registrando a versão do banco de dados; a tabela de tradução genética e o gênero/espécie vêm de classificação taxonômica (GTDB-Tk), nunca de suposição.",
+    "stack": "hifiasm, Flye/Canu, SPAdes/MEGAHIT, BUSCO, QUAST, Bakta, Prokka, BRAKER3. Bancos: NCBI, RefSeq, GenBank, Pfam, KEGG, InterPro."
+   },
+   {
+    "titulo": "Genômica comparativa (ortologia, pangenoma, sintenia, seleção, transferência de anotação)",
+    "quando": "Quando o usuário pedir para comparar genomas entre espécies ou linhagens: inferir ortólogos/famílias gênicas, montar pangenoma, detectar sintenia/HGT/introgressão, testar seleção positiva (dN/dS) ou projetar anotações de uma referência para um genoma novo.",
+    "regras": "Re-anotar todos os genomas do conjunto com UM único pipeline/versão antes de comparar (pangenoma/ortologia) — misturar anotações de fontes diferentes infla artificialmente o genoma acessório; para pangenoma bacteriano usar Panaroo (Roary está obsoleto); para projeção de anotação escolher a ferramenta pela divergência (mesma espécie→liftover/Liftoff; gênero→Liftoff+miniprot; família ou mais→TOGA/GeMoMa).",
+    "stack": "OrthoFinder, Panaroo/PPanGGOLiN, TOGA, LiftOff, MCScanX/GENESPACE, PAML/HyPhy, Cactus/minimap2, Dsuite. Bancos: NCBI, Ensembl, UCSC, UniProt, GTDB, KEGG."
+   },
+   {
+    "titulo": "Filogenética molecular (inferência ML/Bayesiana, árvore de espécies, datação, manipulação de árvores)",
+    "quando": "Quando o usuário pedir para construir uma árvore filogenética (máxima verossimilhança ou Bayesiana), interpretar valores de suporte, estimar árvore de espécies sob coalescência (ILS), datar divergências, ou ler/manipular/visualizar arquivos de árvore (Newick).",
+    "regras": "Usar IQ-TREE2 com ModelFinder (-m MFP) como padrão para ML e reportar fatores de concordância gCF/sCF junto do suporte — UFBoot exige corte >=95 (não a regra 70 do bootstrap clássico, que é outra escala); árvore de genes concatenada não substitui árvore de espécies sob ILS (usar ASTRAL); toda datação precisa de calibração externa (fóssil/prior), nunca só dos dados de sequência.",
+    "stack": "IQ-TREE2, RAxML-NG, ASTRAL, MrBayes/BEAST2, mafft/trimAl, Bio.Phylo/ete3. Bancos: NCBI."
+   }
+  ],
+  "clinical": [
+   {
+    "titulo": "Imagem médica digital: WSI, DICOM/3D e bancos de imagem",
+    "quando": "Quando o usuário solicitar processamento de lâminas de patologia digital (WSI), leitura/edição de DICOM, segmentação ou registro de imagem 3D (CT/MRI/microscopia), ou integração com um servidor OMERO ou o NCI Imaging Data Commons.",
+    "regras": "DICOM/NIfTI/WSI (SVS/NDPI) são os formatos padrão; nnU-Net exige conversão para o layout de dataset nnU-Net antes de treinar; use pathml para pipeline multiplex fim-a-fim (tile→normalização→segmentação→features) e histolab para tiling/filtragem pontual H&E/IHC.",
+    "stack": "histolab, pathml, nnU-Net, pydicom, SimpleITK, omero-py, idc-index, DuckDB. Bancos: TCGA, Imaging Data Commons (IDC)."
+   },
+   {
+    "titulo": "Bioestatística de ensaios clínicos: desenho, análise e relatório",
+    "quando": "Quando o usuário pedir desenho adaptativo/Bayesiano, cálculo de amostra/poder, teste categórico, regressão logística/sobrevivência, sensibilidade a dados faltantes, controle de multiplicidade, análise de subgrupo, ou relatório (Tabela 1, CONSORT/SPIRIT) de um ensaio clínico.",
+    "regras": "Todas as skills seguem os estimands do ICH E9(R1) e a orientação de ajuste por covariável da FDA 2023 como referência dominante; populações de análise padrão são ITT/FAS/PP/Safety.",
+    "stack": "R survival, brms, Stan/JAGS, statsmodels, scipy, lifelines. Bancos: FDA, EMA, WHO, ClinicalTrials.gov."
+   },
+   {
+    "titulo": "Genômica clínica: classificação de variantes, farmacogenômica, priorização, biópsia líquida e laudos",
+    "quando": "Quando o usuário pedir classificação ACMG/AMP de variante germinativa ou CNV, chamada de star-allele farmacogenômico (CPIC/DPWG), priorização de variante de doença rara (trio) ou de painel de portador, análise de ctDNA/biópsia líquida, ou geração de laudo clínico (WES, perfil genômico, farmacogenômico) a partir de dados de sequenciamento ou de array DTC.",
+    "regras": "Classificação ACMG/AMP usa o sistema de pontos de Tavtigian com calibração Pejaver 2022/Bergquist 2025 (um preditor in-silico por vez, sem empilhar REVEL+BayesDel+VEST4) e overrides de VCEP CSpec quando existentes; frequência populacional via gnomAD grpmax_faf95 (Whiffin); star-alleles farmacogenômicos via nomenclatura PharmVar + diretriz CPIC/DPWG.",
+    "stack": "VEP, GATK, PharmCAT, Cyrius, Exomiser, WhatsHap, bcftools, pandas. Bancos: ClinVar, gnomAD, PharmGKB/ClinPGx, OMIM, dbSNP, COSMIC."
+   }
+  ],
+  "databases": [
+   {
+    "titulo": "Acesso federado a bancos genômicos e de sequência (NCBI/Ensembl/EBI)",
+    "quando": "Quando o usuário pedir para buscar, baixar ou cruzar genes, transcritos, sequências, anotações, dados de expressão (GEO/ARCHS4), interações (PPI/KEGG/Reactome) ou leituras brutas (SRA/ENA) em bancos públicos via REST/E-utilities.",
+    "regras": "Sempre fixar/versionar a release ou assembly (ex.: Ensembl archive eNNN, GRCh38 vs GRCh37) e respeitar limites de taxa com retry/backoff (E-utilities: 3 req/s sem chave, 10 com chave; Ensembl: ~15 req/s), preferindo endpoints em lote (POST batch, EPost+history server) a loops de chamada única.",
+    "stack": "requests, Biopython/Entrez, GEOparse, GEOquery (R/Bioconductor), gget, BioMart, pandas, sra-tools. Bancos: NCBI (Gene/GenBank/RefSeq), Ensembl, UniProt, GEO, SRA/ENA, KEGG."
+   },
+   {
+    "titulo": "Genômica clínica, populacional e oncológica de variantes",
+    "quando": "Quando o usuário pedir significância clínica, frequência populacional, associação a doença/traço, mutação somática ou par gene-fármaco de uma variante/gene específico.",
+    "regras": "Nunca confundir variante germinativa (ClinVar/gnomAD/dbSNP) com somática (COSMIC/cBioPortal); sempre citar o build genômico (GRCh37/38) e o código/categoria de significância clínica exatamente como retornado pela fonte, sem reclassificar.",
+    "stack": "E-utilities/Entrez, VEP, pandas, requests, GraphQL (gnomAD). Bancos: ClinVar, dbSNP, gnomAD, GWAS Catalog, COSMIC/cBioPortal (TCGA), ClinPGx/CPIC."
+   },
+   {
+    "titulo": "Ferramentas translacionais complementares (protocolos, ELN, biobanco, evidência de alvo)",
+    "quando": "Quando o usuário pedir protocolos de laboratório, dados de caderno eletrônico (ELN), variáveis do UK Biobank, evidência agregada de alvo terapêutico ou predição de elementos regulatórios (enhancer/promoter) via API de ML.",
+    "regras": "Tratar essas fontes como apoio à triagem, não como inferência causal ou recomendação clínica; manter credenciais de API fora do código-fonte versionado.",
+    "stack": "requests, python3, keras. Bancos: protocols.io, Labstep, UK Biobank, Open Targets, TuringDB."
+   }
+  ],
+  "epigenomics": [
+   {
+    "titulo": "Cromatina aberta e ligação de fatores: ATAC-seq / ChIP-seq / CUT&RUN-Tag",
+    "quando": "Quando o usuário pedir para chamar picos, checar QC, comparar acessibilidade/ligação entre condições, mapear footprints de TF, anotar picos ou analisar dados de ATAC-seq, ChIP-seq, CUT&RUN ou CUT&Tag (bulk ou single-cell).",
+    "regras": "QC estilo ENCODE (FRiP, TSS enrichment, NSC/RSC, NRF/PBC1/PBC2) é obrigatório antes de qualquer chamada de pico; MACS2/MACS3 é o chamador padrão (narrow para TF, broad para histona) com IDR ou peakset de consenso entre réplicas, e comparações diferenciais rodam sobre esse peakset fixo via DiffBind/DESeq2/edgeR, normalizando por spike-in quando disponível.",
+    "stack": "samtools, bwa/bowtie2, bedtools, deeptools, macs2/macs3, homer, deseq2/edger, signac/archr. Bancos: encode, ucsc, gencode, jaspar, hocomoco."
+   },
+   {
+    "titulo": "Interações proteína-RNA: CLIP-seq (eCLIP/iCLIP/PAR-CLIP)",
+    "quando": "Quando o usuário pedir para mapear sítios de ligação de proteínas de RNA (RBP), detectar sítios de crosslink em resolução de nucleotídeo, achar motivos de ligação de RBP/miRNA, ou analisar dados de eCLIP/iCLIP/PAR-CLIP/CLASH/STAMP.",
+    "regras": "Extração de UMI e trimming de adaptador precedem o alinhamento e devem preservar o sítio de crosslink; alinhamento por STAR/bowtie2 (multi-mapeador quando o RBP liga repetições) seguido de peak calling específico de CLIP (CLIPper/PureCLIP/CTK) com controle SMInput/IgG obrigatório e reprodutibilidade avaliada por IDR.",
+    "stack": "star, bowtie2, samtools, bedtools, cutadapt, homer, meme. Bancos: gencode, encode, targetscan."
+   },
+   {
+    "titulo": "Metilação do DNA e relógios epigenéticos (arrays 450K/EPIC e bisulfito WGBS/RRBS)",
+    "quando": "Quando o usuário pedir para testar metilação diferencial (DMC/DMR), desenhar/rodar um EWAS, deconvoluir composição celular, ou calcular idade epigenética (DNAm age/aceleração) a partir de arrays Illumina ou sequenciamento bisulfito.",
+    "regras": "Distinguir dado de contagem bisulfito (modelo beta-binomial em M/Cov, ex. DSS) de dado contínuo de array (M-value com limma), sempre reportando delta-beta junto ao FDR; correção por composição celular (deconvolução tipo Houseman) é obrigatória em tecido bulk antes de qualquer EWAS; relógios epigenéticos são preditores congelados — nunca re-treinar nem usar seus CpGs para enriquecimento de vias.",
+    "stack": "bioconductor(R), limma, methylKit, DSS, dmrseq, bismark, methylclock. Bancos: ucsc, string, unite."
+   }
+  ],
+  "genome-eng": [
+   {
+    "titulo": "Triagem estatística de screens de CRISPR poolados",
+    "quando": "Quando o usuário pedir para chamar hits (essencialidade, sensibilizadores/supressores, edição de base/prime em escala de biblioteca) a partir de contagens de sgRNA de um screen CRISPR poolado, incluindo QC, correção de batch/CN e consenso entre métodos.",
+    "regras": "Seguir a ordem contagem -> QC -> correção de CN/batch -> hit-calling pelo método casado ao desenho (MAGeCK RRA/MLE, BAGEL2, drugZ, JACKS ou Chronos) -> consenso de 2-3 métodos para hits de alto risco, aplicando a regra do segundo-melhor sgRNA para descartar hits movidos por um único guia.",
+    "stack": "mageck, bagel2, drugz, jacks, chronos, crispresso2, edger, statsmodels. Bancos: depmap, clinvar, cosmic, kegg, reactome."
+   },
+   {
+    "titulo": "Design de edição genômica de precisão (gRNA, base/prime editing, HDR)",
+    "quando": "Quando o usuário pedir para desenhar guias de CRISPR-Cas9/Cas12a para um locus específico, guias de base editor (CBE/ABE), pegRNAs de prime editing, template de HDR/knock-in, ou prever off-targets genoma-inteiro de um alvo pontual (fora do contexto de biblioteca de screen).",
+    "regras": "Escanear PAM e aplicar filtros rígidos (TTTT Pol-III, GC%) antes de pontuar on-target (Rule Set 2/Azimuth/CRISPRon) e off-target (Cas-OFFinder/CFD) por locus; para HDR, cortar a <=10bp do edito com braço de homologia dimensionado e mutação de bloqueio de PAM codon-checked.",
+    "stack": "biopython, cas-offinder, muscle, xgboost. Bancos: genbank, ensembl, gnomad, clinvar, intact."
+   }
+  ],
+  "immuno-cyto": [
+   {
+    "titulo": "Bioimagem e microscopia celular (segmentação, tracking, viewer)",
+    "quando": "Quando o usuário pedir para segmentar células/núcleos, rastrear partículas/vesículas, visualizar pilhas 2D/3D/4D ou pré-processar imagens de microscopia de fluorescência/brightfield em Python.",
+    "regras": "Segmentação por deep learning pré-treinado (Cellpose cyto3/nuclei/tissuenet) sem retraining; segmentação clássica (threshold/watershed/active contours) e medição de region properties via scikit-image; CV pesada em tempo real (contorno/blob/optical flow) via OpenCV; macros/plugins Fiji (Bio-Formats, TrackMate, Analyze Particles) só via pyimagej quando o pipeline exige o ecossistema ImageJ2; tracking de partículas único via trackpy (Crocker-Grier) com filtro de trajetórias curtas antes do MSD.",
+    "stack": "Cellpose, scikit-image, napari, OpenCV, PyImageJ/Fiji, trackpy, NumPy, pandas. Bancos: STRING."
+   },
+   {
+    "titulo": "Citometria de fluxo, espectral, mass cytometry (CyTOF) e imaging mass cytometry (IMC/MIBI)",
+    "quando": "Quando o usuário pedir para ler/gatiar/compensar/normalizar/clusterizar/comparar populações celulares em dados de citometria de fluxo, espectral, CyTOF ou tecido multiplexado IMC/MIBI.",
+    "regras": "Ler FCS sempre com transformation=FALSE e truncate_max_range=FALSE antes de compensar (o default 'linearize' do flowCore distorce silenciosamente); em testes diferenciais tratar o paciente/amostra (não a célula) como unidade experimental (diffcyt, scCODA); segmentação IMC/MIBI via Mesmer/Cellpose/ilastik com QC de spillover lateral e SNR por pixel antes de fenotipar.",
+    "stack": "flowCore, flowWorkspace/CytoML, FlowKit, CATALYST, diffcyt, FlowSOM/PhenoGraph, squidpy/imcRtools, Mesmer/Cellpose. Bancos: INTACT, ENCODE."
+   },
+   {
+    "titulo": "Imunoinformática (epítopos/MHC/neoantígenos) e repertório TCR/BCR",
+    "quando": "Quando o usuário pedir para prever epítopos B/T ou ligação a MHC classe I/II, priorizar neoantígenos, ou processar/analisar repertórios de TCR/BCR (montagem V(D)J, clonalidade, diversidade, especificidade antigênica).",
+    "regras": "Reportar sempre %Rank/EL (não afinidade bruta) para binding a MHC-I/II; tratar match de banco (VDJdb/IEDB/McPAS) ou cluster de especificidade (GLIPH2/TCRdist) como hipótese, nunca como chamada definitiva de especificidade; rodar MiXCR com preset casado à química da biblioteca (5'RACE vs multiplex-primer, RNA vs gDNA) antes de qualquer downstream.",
+    "stack": "NetMHCpan/NetMHCIIpan, MHCflurry, MixMHCpred/MixMHC2pred, pVACtools, MiXCR, IgBLAST, scirpy, Immcantation (alakazam/shazam/scoper/dowser). Bancos: IEDB, IMGT, VDJdb, McPAS-TCR, TCGA, Ensembl."
+   }
+  ],
+  "metagenomics": [
+   {
+    "titulo": "Metagenômica shotgun: taxonomia, resistoma e função",
+    "quando": "Quando o usuário pedir para classificar taxonomicamente, quantificar resistoma (AMR), perfilar vias funcionais, rastrear cepas ou controlar contaminação/hospedeiro de um metagenoma shotgun (FASTQ pareado).",
+    "regras": "Rodar Kraken2 com --confidence 0.1-0.4 e sempre repassar para Bracken antes de tratar contagem como abundância (fração de leitura != fração celular), com depleção de hospedeiro/decontam obrigatória antes da classificação e uso de RGI apenas com hits Perfect/Strict para o resistoma.",
+    "stack": "kraken2, bracken, metaphlan, humann, bowtie2, rgi/amrfinder, abricate, pandas. Bancos: genbank, refseq, gtdb, card, kegg, who."
+   },
+   {
+    "titulo": "Microbioma amplicon (16S/ITS) via QIIME2/DADA2",
+    "quando": "Quando o usuário pedir para processar amplicons 16S/ITS demultiplexados, inferir ASVs, atribuir taxonomia, calcular diversidade alfa/beta, testar abundância diferencial ou prever função (PICRUSt2) a partir de dados de amplicon.",
+    "regras": "Seguir o pipeline DADA2 padrão (cutadapt --discard-untrimmed -> filterAndTrim -> learnErrors -> dada -> mergePairs) dentro do modelo de artefatos .qza/.qzv do QIIME2, usando métodos compositional-aware (ALDEx2/ANCOM-BC2) para abundância diferencial em vez de testes paramétricos ingênuos.",
+    "stack": "qiime2, dada2, cutadapt, mafft, picrust2, scikit-learn. Bancos: silva, greengenes, unite, gtdb, ncbi."
+   }
+  ],
+  "multiomics": [
+   {
+    "titulo": "Enriquecimento de vias biológicas (GO/KEGG/Reactome/WikiPathways)",
+    "quando": "Quando o usuário pedir enriquecimento funcional (ORA ou GSEA) de uma lista de genes diferencialmente expressos ou de um vetor rankeado contra bancos de vias (GO, KEGG, Reactome, WikiPathways, módulos/topologia), comparar condições, ou consultar diretamente uma dessas bases via API/REST.",
+    "regras": "ORA sempre com universo (background) explícito = genes efetivamente testados, nunca o banco inteiro; IDs convertidos ao tipo exigido por cada banco (Entrez/locus tag para KEGG, ENTREZ obrigatório para Reactome); ORA sempre split up/down-regulados; ajuste múltiplo BH (p.adjust<0.05) obrigatório, nunca p bruto; resultados de KEGG devem ser pinados (gson) e datados para reprodutibilidade, pois a consulta é contra um banco vivo.",
+    "stack": "clusterProfiler, ReactomePA, SPIA/graphite, gseapy, fgsea, pathview, reactome2py, KEGGREST. Bancos: KEGG, Reactome, Gene Ontology, WikiPathways, MSigDB, STRING."
+   },
+   {
+    "titulo": "Modelagem metabólica em escala genômica (COBRA/FBA)",
+    "quando": "Quando o usuário pedir para simular crescimento, prever fluxos, identificar genes essenciais/letalidade sintética, desenhar cepas de engenharia metabólica, ou reconstruir/curar/gapfilar um modelo metabólico genome-scale (GEM).",
+    "regras": "Toda predição de crescimento ou essencialidade é relativa a um meio e uma reação de biomassa definidos, nunca reportada sem declará-los; um fluxo individual só é confiável com FVA/pFBA/sampling, nunca um único model.optimize(); knockout sempre por GENE respeitando a regra GPR AND/OR (nunca por reação direta); validar essencialidade contra Keio/Tn-seq/CRISPR usando MCC, não acurácia bruta (classe minoritária).",
+    "stack": "COBRApy, CarveMe, gapseq, memote, StrainDesign, cameo, MICOM/SMETANA, libSBML. Bancos: BiGG Models, KEGG, ModelSEED, AGORA."
+   },
+   {
+    "titulo": "Integração multi-ômica e bancos de sistemas biológicos",
+    "quando": "Quando o usuário quiser integrar duas ou mais camadas ômicas (RNA-seq, ATAC, proteômica, metilação) em fatores latentes ou assinaturas discriminantes, estratificar amostras por similaridade multi-ômica, inferir comunicação célula-célula, ou consultar bancos de interação/cinética/anotação (STRING, Reactome, BRENDA) e frameworks de dados FAIR (LaminDB).",
+    "regras": "Harmonizar cada camada (VST/normalização por view, HVG em contagem comparável entre views) antes de integrar; escolher a estratégia pelo desenho do estudo — MOFA/MOFA+ para eixos não supervisionados, DIABLO/mixOmics quando o fenótipo deve guiar a projeção, SNF para subtipos discretos; sempre checar se um fator/eixo não é apenas lote ou profundidade de sequenciamento antes de interpretá-lo como biologia; fluxo single-cell (muon/MOFA+ via mofapy2/AnnData, Python) e fluxo bulk (MOFA2 em R/Bioconductor) são tratados como escopos distintos, não intercambiáveis.",
+    "stack": "MOFA2/mofapy2, mixOmics (DIABLO/sPLS), SNF, muon/MuData, CellChat, reactome2py, STRING API, LaminDB. Bancos: STRING, Reactome, BRENDA, UniProt, Ensembl, KEGG."
+   }
+  ],
+  "proteo-metabo": [
+   {
+    "titulo": "Proteômica MS shotgun: identificação, quantificação e abundância diferencial",
+    "quando": "Quando o usuário pedir para processar dados de espectrometria de massa shotgun (MaxQuant/DIA-NN/FragPipe/pyOpenMS), importar proteinGroups.txt ou report.parquet, quantificar proteínas (LFQ/TMT/SILAC) ou testar abundância diferencial entre condições.",
+    "regras": "FDR alvo-chamariz (target-decoy) a 1% em nível de peptídeo E proteína (cada nível precisa da sua própria estimativa); zero do MaxQuant vira NaN antes do log2; missingness DDA é MNAR (modelar com proDA/msqrob2/MSstats, nunca imputar por downshift) enquanto DIA é ~MCAR; moderação de variância (limma eBayes trend+robust, ou DEqMS quando há contagem de PSM/peptídeo) é obrigatória em n=3-5 replicatas.",
+    "stack": "MaxQuant, DIA-NN, FragPipe/MSFragger, pyOpenMS, limma, DEqMS, proDA, MSstats. Bancos: UniProt, PRIDE, InterPro, PDB, STRING, KEGG."
+   },
+   {
+    "titulo": "Proteômica por afinidade e relógios biológicos (Olink/SomaScan)",
+    "quando": "Quando o usuário pedir QC/análise diferencial de dados Olink PEA ou SomaLogic SomaScan, ou calcular idade biológica órgão-específica (relógio proteômico Goeminne) a partir de NPX.",
+    "regras": "NPX do Olink já está em escala log2 (nunca log-transformar de novo); coeficientes do relógio vêm fixados por commit pinado do repositório organAging (nunca inventar pesos); dados não-Olink (SomaScan/MS) exigem reescala pelos desvios-padrão da Tabela S3 do artigo antes de aplicar o relógio; delta bruto (predito − cronológico) não é aceleração residualizada.",
+    "stack": "Olink NPX, SomaScan (SOMAmer/RFU), elastic net (organAging), transformação de Gompertz, pandas, scikit-learn. Bancos: GTEx, GEO."
+   },
+   {
+    "titulo": "Metabolômica LC-MS: pré-processamento, anotação e vias",
+    "quando": "Quando o usuário pedir para processar dados LC-MS/GC-MS não direcionados ou direcionados (xcms/MS-DIAL), anotar metabólitos a partir de espectros MS/MS, mapear vias metabólicas ou analisar tracing isotópico/lipidômica.",
+    "regras": "toda anotação de metabólito carrega um nível de confiança explícito MSI/Schymanski (Nível 1 exige padrão autêntico corrido no mesmo método; um score de cosseno alto sozinho não passa de Nível 2a/3); QC e normalização são desenhados por modo de aquisição e inspecionados ANTES de normalizar (normalização mediana esconde falhas de carregamento); enriquecimento de vias deve herdar a incerteza da anotação para não inflar por IDs ambíguos.",
+    "stack": "xcms, MS-DIAL, matchms, SIRIUS/CSI:FingerID, MetFrag, lipidr, PyOpenMS. Bancos: HMDB, KEGG, PubChem, Metabolomics Workbench."
+   }
+  ],
+  "reads-align": [
+   {
+    "titulo": "Alinhamento de reads (curto e longo) e processamento de SAM/BAM/CRAM",
+    "quando": "Quando o usuário pedir para mapear reads Illumina (DNA ou RNA) ou ONT/PacBio a um genoma de referência, ou para ordenar/indexar/filtrar/deduplicar/inspecionar arquivos BAM/CRAM resultantes.",
+    "regras": "Aligner escolhido pelo tipo de dado (bwa-mem2 para DNA curto, STAR/HISAT2 para RNA splice-aware, minimap2 para long-read), sempre com @RG injetado na hora do mapeamento e saída em BAM coordenado+indexado; MAPQ não é portável entre alinhadores (bwa/HISAT2 0-60 com 60=único, STAR usa 255 como sentinela de único e quebra o GATK sem --outSAMmapqUnique 60, Bowtie2 vai até 42).",
+    "stack": "bwa-mem2, STAR, HISAT2, Bowtie2, minimap2, samtools, pysam, GATK. Bancos: NCBI, Ensembl, GENCODE, UCSC, dbSNP, ENCODE."
+   },
+   {
+    "titulo": "QC e pré-processamento de FASTQ (trimming, filtragem, contaminação)",
+    "quando": "Quando o usuário pedir para avaliar/interpretar a qualidade de reads brutos, remover adaptadores, filtrar por qualidade/comprimento, checar contaminação cruzada, processar UMI, ou agregar QC multi-amostra antes do alinhamento.",
+    "regras": "fastp cobre o caso geral em um único passe (trim+filtro+poly-G+relatório) mas nunca usar --dedup fora de bibliotecas não-UMI conhecidas como seguras; interpretar FastQC/MultiQC sempre em função do ensaio, pois o semáforo é calibrado para DNA WGS aleatório e falso-falha em RNA-seq/amplicon/bisulfito por desenho.",
+    "stack": "fastp, FastQC, MultiQC, Cutadapt, Trimmomatic, Kraken2, umi_tools, fgbio. Bancos: NCBI/SRA, GenBank."
+   },
+   {
+    "titulo": "Alinhamento múltiplo/pareado e estrutural de sequências (filogenia/homologia)",
+    "quando": "Quando o usuário pedir para alinhar múltiplas sequências homólogas, comparar duas sequências, aparar colunas de um MSA, calcular identidade/conservação, ou alinhar estruturas de proteína quando a identidade de sequência está na twilight zone.",
+    "regras": "Ferramenta escolhida por tamanho/divergência do dataset (MAFFT/MUSCLE5/Clustal Omega/T-Coffee para MSA de sequência, Foldseek/TM-align/US-align para alinhamento estrutural), sempre aparar o MSA (trimAl/ClipKIT/BMGE) antes de inferência filogenética a jusante.",
+    "stack": "MAFFT, MUSCLE, Clustal Omega, T-Coffee, HMMER, Foldseek, Biopython, RAxML. Bancos: Pfam, PDB, AlphaFoldDB, NCBI."
+   }
+  ],
+  "rnaseq-bulk": [
+   {
+    "titulo": "RNA-seq Bulk: Quantificação e Expressão Diferencial",
+    "quando": "Quando o usuário solicitar contagem de reads, quantificação de transcritos/genes ou teste de expressão diferencial em RNA-seq bulk (FASTQ/BAM -> matriz de contagem -> DESeq2/edgeR).",
+    "regras": "Declarar strandedness e --countReadPairs explicitamente (nunca confiar no nome do kit), preferir índice decoy-aware no Salmon, importar via tximport/tximeta para carregar o offset de comprimento, fixar o nível de referência antes do DESeq() e sempre extrair por contraste nomeado explícito (nunca results(dds) default).",
+    "stack": "featureCounts, Salmon, kallisto, STAR, DESeq2, edgeR, tximport, gseapy/fgsea. Bancos: ensembl, gencode, kegg, msigdb, string, hgnc."
+   },
+   {
+    "titulo": "Splicing Alternativo e Isoformas",
+    "quando": "Quando o usuário pedir para quantificar PSI, detectar splicing diferencial entre condições, analisar isoform switching/DTU funcional, ou processar splicing em long-read/single-cell.",
+    "regras": "Escolher a ferramenta pela pergunta biológica (rMATS/leafcutter/MAJIQ/SUPPA2 para quantificação PSI e diferencial; IsoformSwitchAnalyzeR para consequência funcional de DTU; FRASER/OUTRIDER para outlier em paciente único vs painel) e sempre cruzar contra GENCODE/GTEx como referência de splicing normal.",
+    "stack": "STAR, Salmon, kallisto, rMATS, leafcutter, MAJIQ, SUPPA2, IsoformSwitchAnalyzeR. Bancos: gencode, gtex, encode, clinvar, ensembl, pfam."
+   },
+   {
+    "titulo": "Ribo-seq: Perfilamento de Tradução",
+    "quando": "Quando o usuário pedir para processar dados de Ribo-seq (footprinting), calibrar periodicidade/offset de P-site, detectar ORFs traduzidos, ou calcular eficiência de tradução (TE).",
+    "regras": "Validar periodicidade de 3 nucleotídeos e calibrar o offset de P-site por comprimento de read antes de qualquer chamada de ORF ou TE; TE diferencial exige featureCounts/DESeq2 sobre a razão footprint/mRNA pareada por amostra, nunca sobre footprint isolado.",
+    "stack": "samtools, bowtie2, STAR, cutadapt, picard, pysam, scipy, numpy. Bancos: gencode, silva."
+   }
+  ],
+  "seq-tools": [
+   {
+    "titulo": "Manipulação, I/O e design sobre sequências (Biopython/primer3)",
+    "quando": "Quando o usuário pedir para ler/escrever/filtrar/converter FASTA/FASTQ/GenBank, calcular GC/Tm/pI/CAI, transcrever/traduzir, gerar reverse complement, indexar arquivos grandes para acesso aleatório, desenhar e validar primers PCR/qPCR, ou mapear/planejar digestão com enzimas de restrição (incl. Golden Gate).",
+    "regras": "Usar streaming/indexação (SeqIO.parse/SeqIO.index) em vez de carregar tudo em lista para arquivos grandes; primer3-py é o motor de design E de validação termodinâmica (hairpin/homodímero/heterodímero) antes de checar especificidade in-silico (MFEprimer/Primer-BLAST); Bio.Restriction para sítios/fragmentos/mapas de restrição.",
+    "stack": "Biopython, Bio.SeqIO, primer3-py, Bio.Restriction, BLAST+, MUSCLE/ClustalW, pysam, samtools. Bancos: NCBI, GenBank, RefSeq, dbSNP, gnomAD, PDB."
+   },
+   {
+    "titulo": "Intervalos genômicos, tracks e picos (ChIP-seq/ATAC-seq)",
+    "quando": "Quando o usuário pedir para intersectar/anotar/mesclar picos em BED, gerar ou consultar tracks bigWig/bedGraph, normalizar cobertura, chamar picos com MACS3, enriquecer motivos de fator de transcrição com HOMER, ou parsear GTF/GFF3.",
+    "regras": "BED é 0-based half-open (GenBank/VCF são 1-based) — sempre `sort` antes de merge/closest/map e passar `-g genome.txt`, checando chr1-vs-1; normalizar cobertura (RPGC/CPM) com deepTools antes de comparar amostras; 'gene mais próximo' (closest) é resposta geométrica, não prova de regulação — para enhancer distal validar com ABC/PCHi-C/eQTL.",
+    "stack": "bedtools, pybedtools/pyranges/bioframe, deepTools, MACS3, HOMER, samtools, pyBigWig, gffutils. Bancos: UCSC, ENCODE, RefSeq, GENCODE, JASPAR, HOCOMOCO."
+   },
+   {
+    "titulo": "QC de sequenciamento, filogenia e genética de populações",
+    "quando": "Quando o usuário pedir para agregar relatórios de QC (FastQC/MultiQC) de qualquer ferramenta upstream, construir/anotar/renderizar árvores filogenéticas, calcular diversidade de nucleotídeos e testes de neutralidade (Tajima's D, LD), ou baixar genomas/taxonomia em massa via NCBI datasets.",
+    "regras": "multiqc-reporter só agrega saídas já geradas por outras ferramentas (não roda FastQC/aligners — isso é bioqc-mcp ou o próprio pipeline); ETE3 é a camada de renderização/anotação taxonômica sobre árvores Newick/NHX/PhyloXML; DnaSP exige alinhamento multi-FASTA prévio; o CLI `datasets`/`dataformat` da NCBI é ferramenta separada do Entrez do Biopython (download em massa vs. consulta pontual).",
+    "stack": "FastQC, MultiQC, ETE3, IQ-TREE/RAxML/BEAST, scikit-bio, NCBI datasets CLI. Bancos: NCBI, GenBank, RefSeq."
+   }
+  ],
+  "single-cell-spatial": [
+   {
+    "titulo": "scRNA-seq: pipeline padrão (QC, integração de batch, clustering, anotação, trajetória)",
+    "quando": "Quando o usuário pedir para processar ou analisar dados de scRNA-seq (10x, h5ad, matrix.mtx): QC, normalização, correção de batch, clustering, anotação de tipo celular ou inferência de trajetória/pseudotime/velocity.",
+    "regras": "Manter contagens brutas em adata.layers['counts'] e normalizar log1p-CP10K antes de HVG/PCA; nunca rodar DE sobre embedding corrigido por batch (usar pseudobulk); anotação automática é hipótese de mundo fechado — triar doublet/baixa qualidade/artefato de lote antes de declarar tipo celular novo.",
+    "stack": "scanpy, anndata, Seurat, scVI/scANVI, Harmony, CellTypist, popV, Leiden/igraph. Bancos: CELLxGENE Census, Human Cell Atlas, Ensembl, ENCODE, STRING, HGNC."
+   },
+   {
+    "titulo": "Transcriptômica espacial: I/O, QC, domínios, deconvolução e comunicação (Visium/Xenium/MERFISH/CosMx)",
+    "quando": "Quando o usuário pedir para carregar, controlar qualidade, segmentar, deconvoluir, mapear domínios teciduais ou analisar comunicação célula-célula/metabólito em dados espaciais (Visium/Visium HD, Xenium, MERFISH/MERSCOPE, CosMx, Slide-seq, Stereo-seq, CODEX/IMC).",
+    "regras": "QC espacial usa pisos de contagem mais permissivos que scRNA-seq dissociado (não descartar célula real de baixa contagem em imaging); o grafo de vizinhança espacial (kNN/Delaunay/hex do Squidpy) é construído antes e alimenta toda estatística a jusante (domínios, Moran's I, comunicação).",
+    "stack": "Squidpy, Scanpy/AnnData, SpatialData, BANKSY/STAGATE/GraphST, cell2location/RCTD, Cellpose/StarDist/Baysor, scimap, Signac/ArchR. Bancos: ENCODE, JASPAR, UCSC, CARD."
+   },
+   {
+    "titulo": "ClawBio: pipelines locais empacotados de scRNA-seq e predição de expressão virtual",
+    "quando": "Quando o usuário pedir para RODAR (não apenas explicar) um pipeline local empacotado — QC/cluster/anotação via scanpy, embedding scVI/scANVI, upstream FASTQ com nf-core/scrnaseq — ou prever expressão a partir de imagem H&E ou sequência de DNA.",
+    "regras": "Cada skill executa um script local com contrato padrão de saída (report.md, result.json, bundle de reprodutibilidade commands.sh/environment.yml/checksums.sha256) e rejeita matriz já processada como entrada.",
+    "stack": "nf-core/scrnaseq, STAR, scvi-tools, Scanpy, Scrublet, CellTypist, Nextflow. Bancos: TCGA, HGNC, GTEx, STRING."
+   }
+  ],
+  "stats-ml": [
+   {
+    "titulo": "Modelagem preditiva e desenho experimental em genômica/ômicas",
+    "quando": "Quando o usuário solicitar desenho de experimento (batch, poder estatístico, tamanho amostral, randomização/blocagem), controle de FDR em testes múltiplos, ou modelagem preditiva (classificação, sobrevivência, descoberta de biomarcadores, explicabilidade) sobre dados ômicos ou clínicos.",
+    "regras": "Seleção de features e ajuste de hiperparâmetros sempre dentro do CV aninhado (nunca antes, sob pena de vazamento); reportar discriminação E calibração (C-index de Uno + AUC dependente do tempo + Brier integrado, nunca C-index isolado); controlar FDR (Benjamini-Hochberg/Storey q-value) em testes múltiplos; usar Cox/regressão penalizada (elastic-net) como baseline no regime p>>n.",
+    "stack": "scikit-survival, lifelines, scikit-learn, SHAP, LIME, statsmodels, PyMC, DESeq2/edgeR (dispersão). Bancos: ENCODE, WHO, STRING, IntAct."
+   },
+   {
+    "titulo": "Motores de workflow e dataframes em escala para pipelines científicos",
+    "quando": "Quando o usuário precisar orquestrar um pipeline reprodutível (Nextflow/Snakemake) ou processar dados maiores que a RAM (dask/polars/vaex/zarr) fora do escopo de um pipeline NGS já coberto por skill dedicada.",
+    "regras": "Nextflow para pipelines estilo nf-core em nuvem/HPC (troca de executor só por config); Snakemake para regras baseadas em dependência de arquivo com ambiente conda/Singularity por regra; escolher polars (cabe na RAM, lazy) vs dask (cluster/HPC, laptop-a-HPC) vs vaex (out-of-core em máquina única) vs zarr (arrays N-D chunked/nuvem) pelo regime real de tamanho dos dados, não por preferência de sintaxe.",
+    "stack": "Nextflow, Snakemake, Dask, Polars, Vaex, Zarr, NetworkX, SymPy. Bancos: STRING."
+   },
+   {
+    "titulo": "Sinais neurofisiológicos, EHR e NLP biomédico",
+    "quando": "Quando o usuário pedir análise de eletrofisiologia (ECG/EEG/EMG, Neuropixels/spike sorting), modelagem preditiva sobre dados de prontuário eletrônico (MIMIC/OMOP), ou mineração de texto biomédico (NER, extração de relação em literatura científica).",
+    "regras": "Curar unidades de spike sorting por métricas de qualidade (ISI, taxa de disparo, SNR) antes de qualquer análise downstream; usar tokenização/vocabulário biomédico (BioBERT/PubMedBERT) em vez de modelos de linguagem genéricos para NLP sobre literatura científica.",
+    "stack": "NeuroKit2, SpikeInterface, ProbeInterface, Kilosort4, PyHealth, HuggingFace Transformers (BioBERT/PubMedBERT). Bancos: PubMed, PMC, STRING, CARD, ENCODE."
+   }
+  ],
+  "structural-chem": [
+   {
+    "titulo": "Cheminformática e triagem virtual (docking, descritores, ADMET, geração de moléculas)",
+    "quando": "Quando o usuário pedir screening/triagem virtual, docking molecular, cálculo de descritores/fingerprints/similaridade, predição ADMET, geração ou enumeração de compostos, ou consulta a bancos químicos (ChEMBL, PubChem, DrugBank, ZINC) para descoberta de fármacos.",
+    "regras": "Padronizar SMILES/SDF com RDKit (canonicalizar, remover sais, neutralizar) antes de qualquer descritor/fingerprint; ECFP4 (radius=2, 2048 bits) + Tanimoto como similaridade padrão de partida, recalibrando o limiar por biblioteca/tarefa; tratar score de docking, QED e rótulos de drug-likeness (Lipinski/Veber) como sinal de triagem, nunca como confirmação de atividade ou de que a molécula é sintetizável.",
+    "stack": "RDKit, Datamol, AutoDock Vina, SMINA, GNINA, DiffDock, OpenBabel, AiZynthFinder. Bancos: ChEMBL, PubChem, ZINC, DrugBank, BindingDB, PDB."
+   },
+   {
+    "titulo": "Biologia estrutural: predição, preparo e análise geométrica de proteínas",
+    "quando": "Quando o usuário pedir para obter ou predizer a estrutura de uma proteína (AlphaFold/Boltz/ESMFold/ColabFold), preparar um receptor para docking/MD, analisar geometria/interface/RMSD/RMSF de um PDB ou mmCIF, ou avaliar trajetória de dinâmica molecular.",
+    "regras": "Ler pLDDT na coluna de B-factor com polaridade invertida (confiança 0-100, não agitação térmica) e nunca inferir posição relativa entre domínios sem checar o PAE; preferir mmCIF/BinaryCIF ao PDB legado para estruturas grandes; adicionar hidrogênios e estado de protonação (PDBFixer/PROPKA/PDB2PQR) antes de docking ou MD; converter unidades de mdtraj (nm, ps, radianos) antes de reportar RMSD/Rg/ângulos.",
+    "stack": "Biopython (Bio.PDB), Boltz-1/2, AlphaFold2/ColabFold/AlphaFold3, ESMFold, MDAnalysis, mdtraj, DSSP, PDBFixer. Bancos: PDB, AlphaFold DB, EMDB, UniProt."
+   },
+   {
+    "titulo": "Literatura biomédica e triagem de dados de viabilidade (ClawBio)",
+    "quando": "Quando o usuário pedir para buscar ou sintetizar literatura sobre um gene/doença/termo (PubMed/bioRxiv), analisar um FASTA isolado, ou rodar um screening de reposicionamento de fármacos a partir de dados de viabilidade celular.",
+    "regras": "Toda consulta usa API ao vivo (NCBI E-utilities/bioRxiv), nunca citação inventada, respeitando o limite de taxa do NCBI (3 req/s, sleep ~0,34 s) e sempre reportando PMID/DOI reais junto ao resumo.",
+    "stack": "NCBI E-utilities (esearch/efetch), Biopython Entrez, bioRxiv API, BGPT MCP, Biopython, seqkit. Bancos: PubMed, bioRxiv, DepMap."
+   }
+  ],
+  "variants-popgen": [
+   {
+    "titulo": "Variantes: chamada germinativa/somática, filtragem, anotação funcional e CNV",
+    "quando": "Quando o usuário pedir para chamar variantes de BAM/CRAM (GATK/DeepVariant/bcftools), filtrar um VCF, anotar consequência funcional (VEP/SnpEff/ANNOVAR) ou detectar CNV (CNVkit/GATK-CNV/allele-specific).",
+    "regras": "Filtrar SNP e indel sempre separadamente e em dois níveis (site vs genótipo); usar VQSR só com WGS único ou coorte grande com recursos de verdade, senão hard-filter; CNV via CNVkit exige painel de normais pooled (>=5, purity-matched) para chamadas focais confiáveis -- nunca referência flat para uso clínico.",
+    "stack": "GATK4, bcftools, DeepVariant, CNVkit, VEP, SnpEff, ANNOVAR, samtools. Bancos: dbSNP, ClinVar, gnomAD, Ensembl, 1000 Genomes, COSMIC."
+   },
+   {
+    "titulo": "Genética populacional e genômica causal (GWAS, PCA/LD, fine-mapping, MR, TWAS, herdabilidade)",
+    "quando": "Quando o usuário pedir GWAS de variante única, PCA/estrutura populacional, poda por LD, fine-mapping de um locus GWAS, Mendelian Randomization, TWAS/colocalização, herdabilidade ou correlação genética, ou pontuação de risco poligênico (PRS).",
+    "regras": "Escolher o motor de associação pela estrutura amostral (parentesco/desbalanço caso-controle), não por preferência -- GLM+PCs quando a amostra é não-relacionada, LMM (GEMMA/BOLT-LMM/SAIGE/regenie) quando há parentesco; sempre diagnosticar mismatch de LD (estimate_s_rss/kriging_rss) antes de reportar fine-mapping; MR sempre com bateria de sensibilidade (Egger, MR-PRESSO, Steiger, F-stat).",
+    "stack": "PLINK2, GEMMA, BOLT-LMM, SAIGE, regenie, LDSC, susieR, TwoSampleMR. Bancos: 1000 Genomes, TOPMed, GTEx, GWAS Catalog, Open Targets, UK Biobank."
+   },
+   {
+    "titulo": "Genômica ecológica/epidemiológica/temporal e genômica pessoal (dados DTC)",
+    "quando": "Quando o usuário pedir genética de conservação/eDNA/metabarcoding, tipagem ou filodinâmica de patógenos, ritmicidade circadiana em série temporal, ou análise de arquivo pessoal de DNA (23andMe/AncestryDNA) para ancestralidade, PRS ou HLA.",
+    "regras": "PERMANOVA sempre pareada com PERMDISP em ecologia de comunidades; filodinâmica exige relógio molecular calibrado por data de coleta (TreeTime/BEAST2); pipelines de dado pessoal (ClawBio) tratam um único indivíduo/arquivo DTC (não coorte) e sempre incluem disclaimer de não-diagnóstico.",
+    "stack": "ADMIXTURE, DADA2, TreeTime, BEAST2, Nextclade, Pangolin, PGS Catalog. Bancos: SILVA, UNITE, GenBank, SRA, PGP, GWAS Catalog."
+   }
+  ],
+  "viz-report": [
+   {
+    "titulo": "Visualização estatística e figuras de publicação (matplotlib/seaborn/ggplot2/plotly)",
+    "quando": "Quando o usuário pedir para plotar/gerar figuras científicas (distribuições, comparações, séries, multi-painel) para manuscrito, pôster ou apresentação.",
+    "regras": "Exportar em vetor (PDF/SVG) com fonte TrueType/Type-42 embutida, paleta CVD-safe (viridis/Okabe-Ito/Crameri) e ≥300 DPI; só anotar significância depois de escolher o teste certo (paramétrico vs não-paramétrico) e corrigir para múltiplas comparações.",
+    "stack": "matplotlib, seaborn, ggplot2, plotly, statsmodels/scipy, patchwork/cowplot, statannotations, ComplexHeatmap. Bancos: string, encode, kegg, reactome, msigdb."
+   },
+   {
+    "titulo": "Visualização genômica e ômica especializada (Manhattan/QQ, circos, heatmap de expressão, volcano/MA, redução de dimensionalidade, oncoprint, lollipop, sequence logo, upset, rede)",
+    "quando": "Quando o usuário pedir um tipo de gráfico específico de genômica/ômica: GWAS, expressão diferencial, mutações somáticas, redes PPI/regulatórias, clustering de amostras ou tracks de genoma.",
+    "regras": "Usar a skill dedicada ao tipo de figura (não a genérica de matplotlib/seaborn) e os limiares padrão do campo — genome-wide p<5e-8 em Manhattan, shrinkage (apeglm/ashr) + FDR em volcano/MA, ward.D2 e escala robusta em heatmap clusterizado.",
+    "stack": "circlize/pyCirclize, ComplexHeatmap, PLINK/GEMMA/REGENIE, EnhancedVolcano, maftools, Logomaker/ggseqlogo, NetworkX/igraph, pyGenomeTracks. Bancos: ucsc, gencode, tcga, cbioportal, clinvar, gtex."
+   },
+   {
+    "titulo": "Relatórios reprodutíveis e visualização de estrutura/imagem (MultiQC, Quarto/RMarkdown/Jupyter, 3Dmol, segmentação celular, extração de dados de figura)",
+    "quando": "Quando o usuário pedir para montar relatório reprodutível de QC/pipeline, visualizar estrutura molecular interativa, segmentar células em microscopia, ou extrair números de uma figura publicada.",
+    "regras": "Fixar o ambiente (renv/freeze no Quarto, conda export) e versionar notebook/relatório junto dos dados de entrada; exportação 3D (3Dmol.js) deve sair como HTML autocontido, sem dependência externa.",
+    "stack": "MultiQC, Quarto, papermill/nbconvert, 3Dmol.js, Cellpose, OpenCV. Bancos: pdb, string."
+   }
+  ],
+  "workflows-misc": [
+   {
+    "titulo": "Automação de bancada (wet-lab): robótica de pipetagem, LIMS/ELN e protocolos",
+    "quando": "Quando o usuário pedir para escrever/simular protocolos para robôs de pipetagem (Opentrons/Hamilton/Tecan), integrar com Benchling (registro/ELN/inventário), buscar protocolos publicados em protocols.io, ou quantificar bandas de western blot.",
+    "regras": "Simular sempre antes de enviar ao robô físico (opentrons_simulate ou backend de simulação do PyLabRobot); usar opentrons-protocol-api para módulos nativos Opentrons e pylabrobot só quando o script precisa ser portátil entre fabricantes (Hamilton/Tecan) — as duas skills se referenciam explicitamente e não são substitutas uma da outra.",
+    "stack": "opentrons, pylabrobot, Benchling SDK, protocols.io API, ImageJ/Fiji, biopython, pandas. Bancos: string, pubchem, encode."
+   },
+   {
+    "titulo": "Orquestração de pipelines de bioinformática ômica (linguagens de workflow + FASTQ→resultado)",
+    "quando": "Quando o usuário pedir para montar ou rodar um pipeline reprodutível de -ômicas (RNA-seq, ATAC/ChIP-seq, variantes germinativas/somáticas, scRNA-seq, metagenômica, metilação, Hi-C, CRISPR, etc.) do dado bruto ao resultado final, ou decidir entre CWL/Nextflow/Snakemake/WDL/nf-core.",
+    "regras": "Adotar um pipeline nf-core curado (revisão fixada com -r, engine de container via -profile) sempre que existir um pronto para a análise-alvo; usar a skill workflows/<tema> específica quando for preciso justificar cada decisão analítica (QC, alinhador, parâmetros de chamada, estatística) passo a passo — as duas camadas são complementares (nf-core-pipelines cita workflows/rnaseq-to-de como parceira a jusante), nunca rodar sem container/conda pinado.",
+    "stack": "nextflow/nf-core, snakemake, cwl, gatk, bwa/star/salmon, samtools/bcftools, deseq2/edger/limma, docker/singularity. Bancos: sra, geo, ensembl, ncbi, ucsc, encode."
+   },
+   {
+    "titulo": "ClawBio: adapters determinísticos de QC/import e scoring de alvo terapêutico",
+    "quando": "Quando o usuário pedir triagem rápida de QC de amostras (identidade/sexo/contaminação) a partir de um CSV já resumido, mapear dominância de marcador em spots, importar um bundle DRAGEN/Illumina para análise terciária local, gerar cartão de dosagem farmacogenética a partir de foto de medicamento, ou pontuar validação de alvo (GO/NO-GO) em descoberta de fármacos.",
+    "regras": "São skills locais, determinísticas e de escopo estreito, que operam sobre tabelas/resumos já processados sem upload de dado bruto e declaram explicitamente que não substituem as ferramentas canônicas (VerifyBamID/Conpair/Somalier/PLINK IBD, squidpy/decoupler) nem a pipeline bioSkills completa quando o dado ainda é bruto.",
+    "stack": "plink, multiqc, alphafold, python stdlib. Bancos: uniprot, chembl, pdb, depmap, open targets, cpic."
+   }
+  ],
+  "writing": [
+   {
+    "titulo": "Redação e formatação de manuscrito por periódico-alvo (IMRAD, guias de figura, revisão por pares)",
+    "quando": "Quando o usuário pedir para escrever/estruturar um manuscrito, preparar figuras para submissão a um periódico específico (Nature, Cell, Science, PNAS, Lancet, NEJM, eLife, Cancer Research/AACR), ou revisar um manuscrito/grant como referee.",
+    "regras": "Seguir IMRAD + guia de reporte aplicável (CONSORT/STROBE/PRISMA/ARRIVE) e as especificações exatas do periódico-alvo (DPI, formato de arquivo, fonte, convenção de rótulo de painel) antes de submeter; rodar o checklist universal de QA em toda figura gerada.",
+    "stack": "LaTeX/Beamer, Zotero/EndNote, matplotlib (specs). Bancos: pubmed, pmc."
+   },
+   {
+    "titulo": "Busca, síntese e avaliação crítica de literatura científica",
+    "quando": "Quando o usuário pedir para buscar literatura, montar revisão sistemática/scoping (PRISMA), consultar preprints/citações, ou avaliar a qualidade de uma evidência/claim.",
+    "regras": "Escolher a base pelo tipo de conteúdo (PubMed=revisado por pares, bioRxiv/medRxiv=preprint, OpenAlex=cobertura ampla+grafo de citação) e registrar a estratégia booleana/MeSH usada; graduar a evidência por GRADE e hierarquia de desenho de estudo.",
+    "stack": "NCBI E-utilities, OpenAlex API, bioRxiv/medRxiv API. Bancos: pubmed, pmc, ncbi."
+   },
+   {
+    "titulo": "Ideação científica e comunicação visual (hipótese, brainstorming, slides/pôster/esquema)",
+    "quando": "Quando o usuário pedir para gerar ideias de pesquisa, formular uma hipótese testável, ou preparar slides de conferência, pôster ou esquema/graphical abstract.",
+    "regras": "Toda hipótese sai com predição testável e desenho experimental associado; escolher o formato certo por deliverable (pôster=LaTeX beamerposter/tikzposter, slides=Beamer/PowerPoint, esquema=BioRender/Inkscape).",
+    "stack": "LaTeX Beamer/tikzposter, PowerPoint, BioRender/Inkscape. Bancos: ."
+   }
+  ]
  },
  "skills": [
   {

@@ -2,6 +2,75 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [0.9.0] — 2026-10-05 · Ponte com o plugin Bioinfo: a biblioteca de skills passa a responder em português
+
+A plataforma e o plugin Bioinfo (roteador das mesmas 815 skills no assistente de
+código) indexavam a MESMA biblioteca sem se conhecer. O defeito que os dois
+compartilhavam: o índice é em inglês e o público digita em português — na página
+/skills, "metilação" devolvia zero. O plugin já tinha resolvido isso do lado dele;
+esta versão traz a solução para cá sem criar uma segunda fonte.
+
+### Adicionado
+- **Busca de /skills no servidor, em português ou inglês** (`omica/skills/busca.py`,
+  `GET /api/skills`): sem acento e sem caixa, palavras de ligação ignoradas, cada
+  termo vale por si ou pela tradução, AND entre termos e — se nada casa tudo — modo
+  parcial ordenado por IDF (o termo raro pesa mais). Medido no índice real:
+  `metilação` = `methylation` = 21 skills; a frase "quero integrar os lotes do meu
+  single-cell com scvi" devolve as 2 receitas de integração com scVI.
+- **Glossário de busca PT→EN** (297 termos, 148 palavras de ligação) em
+  `data/skills_glossario.json`: é CÓPIA, com o sha do CONTEÚDO da origem (reformatar o
+  arquivo ou trocar CRLF por LF não acusa cópia atrasada); a fonte única é o
+  plugin (`BIOINFO_PLUGIN_DIR`, só no host). `python -m omica reindex` atualiza a
+  cópia; sem o plugin à vista (container, CI) a cópia existente é mantida.
+- **Guias de domínio no índice**: os 55 cards do `INDICE_CONSOLIDADO.md` (quando
+  usar / regras / stack), que o parser descartava, agora entram em
+  `skills_index.json` e aparecem ao escolher o domínio. As 815 skills do índice
+  ficaram idênticas às da versão anterior.
+- **Elo módulo → domínio no manifest** (`skills_dominios`): a página do módulo
+  ganha "Skills relacionadas na biblioteca", a página da receita avisa quando a
+  plataforma já tem análise naquele domínio, e o plugin lê o mesmo campo para pôr
+  o catálogo ANTES da biblioteca no roteamento.
+- **Professor: fora do catálogo não é mais beco sem saída.** Quando o plano é
+  "explicar", inválido, ou o motor falha, a aba mostra as receitas da biblioteca que
+  casam a frase — busca determinística, sem LLM, e sem botão de executar.
+- **Doctor: `Ponte Bioinfo (skills)`** — reprova domínio de manifest que a biblioteca
+  não tem; avisa quando falta o glossário ou quando a cópia ficou para trás do plugin.
+- Ajuda `04_biblioteca_de_skills.md` (catálogo × biblioteca, como buscar, guias).
+
+### Alterado
+- **/skills deixou de embutir o índice inteiro** (330 KB por abertura): a página traz
+  só o cabeçalho e a lista vem de `/api/skills`. `?q=` e `?dominio=` deixam a busca
+  endereçável. O `<script>` ganhou `?v=<versão>`: o JS mudou de contrato com a página
+  e a cópia antiga em cache do navegador deixaria a tabela vazia.
+- **Página da receita**: o front-matter YAML do `SKILL.md` saía como parágrafo cru no
+  topo; agora a descrição completa vira o lead (o índice a trunca em 140 caracteres),
+  há cabeçalho com domínio/origem/stack, e "Voltar" leva ao domínio, não a /ajuda.
+- Ordem dos resultados: quem traz o termo no próprio nome vem primeiro. Antes valia a
+  ordem alfabética do índice: `deseq2` abria com anotação de repetições e ATAC-seq, e
+  as skills de DESeq2 só apareciam depois.
+
+### Corrigido
+- Descrição e stack das skills entravam no `innerHTML` sem escape (texto de terceiros).
+- **Busca sem teto travava a plataforma** (achado da revisão desta versão). Com
+  centenas de siglas na frase — um trecho de Métodos colado no Professor — a busca
+  recompilava um regex por termo × skill e levava 42 s (676 siglas); e a rota
+  `POST /professor/perguntar`, `async def` desde a 0.8.0, rodava motor local e
+  busca DENTRO do event loop, parando o servidor inteiro enquanto o Professor
+  pensava. Agora: regex de sigla compilado uma vez, teto de 20 termos e 2.000
+  caracteres (o mesmo do plugin, para a busca continuar gêmea; a UI avisa "frase
+  longa") e rota síncrona, no threadpool. Medido: 676 siglas → 0,18 s.
+- Os 2 testes de `test_correcoes_auditoria.py` que importam `perfil_tss.py` (numpy)
+  agora PULAM na imagem `web`, que instala só o lock mínimo de propósito
+  (`pytest.importorskip`); no host e na imagem `methyl` continuam rodando. Antes
+  falhavam no container e no CI.
+
+### Testes
+- 32 novos (`tests/test_ponte_bioinfo.py` e cards em `test_skills_index.py`); a
+  suíte passa de 111 para 143 coletados — host: 131 passam, 12 pulam; container
+  `web` (lock real): 129 passam, 14 pulam, 0 falham. Nenhum lê o plugin ou a
+  biblioteca reais: `conftest.py` aponta `BIOINFO_PLUGIN_DIR` para um caminho
+  inexistente.
+
 ## [0.8.0] — 2026-09-14 · Auditoria adversarial: correções científicas e validadores que reprovam
 
 Auditoria de 12 dimensões com verificação adversarial por achado (95 achados

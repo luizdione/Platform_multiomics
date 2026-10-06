@@ -106,6 +106,23 @@ def workflows_testados() -> list[dict[str, Any]]:
     return vitrine
 
 
+def fora_do_catalogo(frase: str, limite: int = 5) -> Optional[dict[str, Any]]:
+    """Pedido fora do catálogo não precisa terminar em "a plataforma não cobre":
+    a biblioteca de skills quase sempre tem a receita.
+
+    Busca DETERMINÍSTICA, a mesma da página /skills — o LLM não participa, e por
+    isso ela vale mesmo quando ele erra o plano ou nem responde. São receitas para
+    LER: nada aqui vira botão de executar. Devolve None se nada casar.
+    """
+    from omica.skills import busca
+
+    achado = busca.buscar(frase, limite=limite)
+    if not achado["termos"] or not achado["total"]:
+        return None
+    return {"frase": frase, "total": achado["total"], "modo": achado["modo"],
+            "traducao": achado["traducao"], "skills": achado["resultados"]}
+
+
 def motor_disponivel() -> tuple[bool, str]:
     cfg = get_config()
     try:
@@ -151,7 +168,8 @@ def perguntar(frase: str, arquivo: str = "", modelo: str = "") -> dict[str, Any]
     ok, modelo_ativo = motor_disponivel()
     if not ok:
         return {"status": "motor_indisponivel",
-                "detalhe": f"Ollama não respondeu em {cfg.ollama_url} — inicie com `ollama serve`."}
+                "detalhe": f"Ollama não respondeu em {cfg.ollama_url} — inicie com `ollama serve`.",
+                "biblioteca": fora_do_catalogo(frase)}
     modelo = modelo or (cfg.ollama_model if modelo_ativo == cfg.ollama_model else modelo_ativo)
     pergunta = frase.strip()
     if arquivo.strip():
@@ -173,9 +191,14 @@ def perguntar(frase: str, arquivo: str = "", modelo: str = "") -> dict[str, Any]
         conteudo = r.json()["message"]["content"]
         plano = Plano.model_validate(_extrair_json(conteudo))
     except (httpx.HTTPError, KeyError, ValueError, ValidationError) as e:
-        return {"status": "erro_do_motor", "detalhe": f"{e.__class__.__name__}: {e}"}
+        return {"status": "erro_do_motor", "detalhe": f"{e.__class__.__name__}: {e}",
+                "biblioteca": fora_do_catalogo(frase)}
     erro = _validar_contra_catalogo(plano)
     if erro:
         return {"status": "plano_invalido", "detalhe": erro,
-                "explicacao": plano.explicacao, "modelo": modelo}
-    return {"status": "ok", "plano": plano.model_dump(), "modelo": modelo}
+                "explicacao": plano.explicacao, "modelo": modelo,
+                "biblioteca": fora_do_catalogo(frase)}
+    # "explicar" = o catálogo não cobre o pedido. É exatamente quando a biblioteca serve.
+    biblioteca = fora_do_catalogo(frase) if plano.acao == "explicar" else None
+    return {"status": "ok", "plano": plano.model_dump(), "modelo": modelo,
+            "biblioteca": biblioteca}

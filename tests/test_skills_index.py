@@ -48,3 +48,26 @@ def test_parse_ignora_tabela_fora_de_secao_de_dominio():
     texto = "| a | b | c | d | e |\n" + FIXTURE
     indice = parse_indice(texto)
     assert indice["total"] == 3
+
+
+def test_parse_extrai_card_do_dominio():
+    # card = quando usar / regras duras / stack; é o que a página /skills mostra
+    # ao escolher o domínio (antes o parser jogava essas linhas fora)
+    texto = FIXTURE.replace(
+        "Regras do domínio em prosa.",
+        "> **QC e alinhamento** — Quando o usuário pedir QC de FASTQ. "
+        "Regras: sempre aparar adaptador. Stack: fastp, bwa-mem2.")
+    indice = parse_indice(texto)
+    assert indice["cards"] == {"reads-align": [{
+        "titulo": "QC e alinhamento",
+        "quando": "Quando o usuário pedir QC de FASTQ.",
+        "regras": "sempre aparar adaptador.",
+        "stack": "fastp, bwa-mem2.",
+    }]}
+    assert indice["total"] == 3  # card não vira skill
+
+
+def test_card_fora_do_padrao_nao_se_perde():
+    indice = parse_indice("## x-y (0 skills)\n\n> texto livre, sem os marcadores\n")
+    assert indice["cards"]["x-y"] == [
+        {"titulo": "", "quando": "texto livre, sem os marcadores", "regras": "", "stack": ""}]

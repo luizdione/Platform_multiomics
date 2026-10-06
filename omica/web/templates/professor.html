@@ -21,6 +21,7 @@
     </label></p>
     <button type="submit" {% if not motor_ok %}disabled{% endif %}>{{ t('professor_perguntar', lang) }}</button>
   </form>
+  <p class="meta">{{ t('professor_dica_skills', lang) }} <a href="/skills?lang={{ lang }}">🧰 {{ t('nav_skills', lang) }}</a></p>
 </section>
 
 {% if resposta %}
@@ -44,6 +45,22 @@
     {% if resposta.explicacao %}<p>{{ resposta.explicacao }}</p>{% endif %}
   {% else %}
     <p class="alerta">⚠️ {{ resposta.detalhe }}</p>
+  {% endif %}
+  {# Fora do catálogo ≠ beco sem saída: receitas da biblioteca que casam a frase.
+     Busca determinística (omica.skills.busca); nada aqui vira botão de executar. #}
+  {% if resposta.biblioteca %}
+    {% set bib = resposta.biblioteca %}
+    <h3>📚 {{ t('professor_biblioteca', lang) }}</h3>
+    <p class="meta">{{ t('professor_biblioteca_sub', lang) }}</p>
+    <table><tbody>
+      {% for s in bib.skills %}
+      <tr><td><a href="/skills/{{ s.pasta }}?lang={{ lang }}">{{ s.id }}</a></td>
+          <td><code>{{ s.dominio }}</code></td>
+          <td>{{ s.descricao }}{% if s.casou %}<br><span class="meta">{{ t('skills_casou', lang) }}: {{ s.casou | join(', ') }}</span>{% endif %}</td></tr>
+      {% endfor %}
+    </tbody></table>
+    <p class="meta">{{ bib.total }} {{ t('skills_n', lang) }} —
+      <a href="/skills?q={{ bib.frase | urlencode }}&lang={{ lang }}">{{ t('professor_ver_todas', lang) }}</a></p>
   {% endif %}
 </section>
 {% endif %}

@@ -4,6 +4,7 @@ Comandos:
   serve     inicia a UI/API (uvicorn) na porta OMICA_PORT
   doctor    diagnóstico da plataforma (--fix-soft: restart compose + reindex)
   reindex   regenera data/skills_index.json a partir do INDICE_CONSOLIDADO.md
+            e atualiza a cópia do glossário de busca PT→EN (data/skills_glossario.json)
   versao    imprime a versão
 """
 from __future__ import annotations

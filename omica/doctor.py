@@ -107,6 +107,55 @@ def _skills() -> Checagem:
     return Checagem("Biblioteca de skills", OK, f"{n} skills indexadas")
 
 
+def _ponte_bioinfo() -> Checagem:
+    """Ponte com o plugin Bioinfo (o roteador das mesmas skills no assistente de código).
+
+    Três coisas apodrecem em silêncio: o elo módulo→domínio do manifest apontar para
+    um domínio que a biblioteca não tem; a busca de /skills ficar sem o glossário
+    PT→EN (volta a casar só em inglês, e ninguém percebe porque "deseq2" continua
+    funcionando); e a cópia do glossário ficar para trás da origem. As duas primeiras
+    se conferem em qualquer lugar, porque os arquivos são versionados; a terceira só
+    no host, onde o plugin existe.
+    """
+    from omica.skills.build_index import (GLOSSARIO_JSON, GLOSSARIO_NO_PLUGIN, INDICE_JSON,
+                                          ler_glossario_do_plugin, sha_do_glossario)
+
+    nome = "Ponte Bioinfo (skills)"
+    try:
+        dominios = set(json.loads(INDICE_JSON.read_text(encoding="utf-8"))["dominios"])
+    except Exception:
+        return Checagem(nome, AVISO, "sem skills_index.json — elo módulo→domínio não verificável")
+    modulos = load_registry().modules
+    orfaos = [f"{m.id}: {d}" for m in modulos for d in m.skills_dominios if d not in dominios]
+    if orfaos:
+        return Checagem(nome, FALHA,
+                        "manifest aponta para domínio que a biblioteca não tem — " + "; ".join(orfaos))
+    elos = sum(1 for m in modulos if m.skills_dominios)
+    if not GLOSSARIO_JSON.exists():
+        return Checagem(nome, AVISO,
+                        "sem glossário PT→EN (data/skills_glossario.json): /skills só casa em "
+                        "inglês — rode `python -m omica reindex` no host")
+    try:
+        meta = json.loads(GLOSSARIO_JSON.read_text(encoding="utf-8"))["_meta"]
+        n = meta["n_termos"]
+    except Exception as e:
+        return Checagem(nome, FALHA, f"skills_glossario.json ilegível: {e}")
+    cfg = get_config()
+    fonte = (cfg.plugin_dir / GLOSSARIO_NO_PLUGIN) if cfg.plugin_dir else None
+    if fonte is None or not fonte.exists():
+        return Checagem(nome, OK, f"{n} termos PT→EN (plugin não visível daqui: cópia não "
+                                  f"conferida); {elos} módulo(s) ligados à biblioteca")
+    try:
+        em_dia = sha_do_glossario(*ler_glossario_do_plugin(fonte)) == meta.get("sha256")
+    except ValueError as e:
+        return Checagem(nome, AVISO, f"glossário do plugin ilegível ({e}); cópia de {n} termos mantida")
+    if not em_dia:
+        return Checagem(nome, AVISO, f"o glossário PT→EN mudou no plugin e a cópia de {n} termos "
+                                     "ficou para trás — rode `python -m omica reindex`")
+    return Checagem(nome, OK, f"{n} termos PT→EN em dia com o plugin; {elos} módulo(s) ligados "
+                              "à biblioteca")
+
+
 def _porta() -> Checagem:
     """Alguém escutando na porta NÃO é a mesma coisa que a ômica no ar.
 
@@ -327,6 +376,7 @@ def rodar(checar_docker: bool = True) -> list[Checagem]:
     checagens.append(_workers())
     checagens.extend(_referencias())
     checagens.append(_skills())
+    checagens.append(_ponte_bioinfo())
     checagens.append(_glossario())
     checagens.append(_selos())
     checagens.append(_resultados_velhos())

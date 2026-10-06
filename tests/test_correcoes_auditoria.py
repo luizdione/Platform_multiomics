@@ -41,6 +41,12 @@ def _carregar_script(rel: str):
         sys.path.pop(0)
 
 
+# perfil_tss.py roda na fila methyl (imagem com numpy/matplotlib). A imagem web instala
+# só o lock mínimo (anti-lição nº 3) e não tem numpy de propósito — lá os testes que
+# importam esse script PULAM, em vez de falhar por um pacote que a web não pode ter.
+SEM_NUMPY = "perfil_tss.py precisa de numpy (imagem methyl); a imagem web não o instala"
+
+
 # ---------------------------------------------------------------- Fst e NaN
 # Linhas REAIS do contraste Angus×Nelore (E:\data\omica\results\genomica\fst),
 # na ordem em que o código antigo as escreveu no "top 20".
@@ -135,6 +141,7 @@ def test_maf_multialelica_difere_da_formula_antiga():
 
 # --------------------------------------------------------- Perfil TSS e fita
 def test_perfil_tss_inverte_a_fita_negativa(tmp_path):
+    pytest.importorskip("numpy", reason=SEM_NUMPY)
     tss_mod = _carregar_script("modules/epigenomica/scripts/perfil_tss.py")
     cov = tmp_path / "amostra.cov.gz"
     # CpG 100 pb à DIREITA do TSS. Num gene da fita −, isso é UPSTREAM.
@@ -156,6 +163,7 @@ def test_perfil_tss_inverte_a_fita_negativa(tmp_path):
 
 
 def test_tss_mapeia_fita_do_painel_real():
+    pytest.importorskip("numpy", reason=SEM_NUMPY)
     tss_mod = _carregar_script("modules/epigenomica/scripts/perfil_tss.py")
     mapa = tss_mod._tss_por_cromossomo(
         REPO / "modules/epigenomica/data/paineis/painel_108.json")

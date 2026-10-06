@@ -19,7 +19,7 @@ Diagnóstico e operação:
 
 ```bash
 python -m omica doctor            # checa Docker, dados, RAM, manifests, skills...
-python -m omica reindex           # regenera data/skills_index.json (815 skills)
+python -m omica reindex           # regenera data/skills_index.json (815 skills) + glossário PT→EN
 docker compose run --rm web pytest -q   # testes dentro do container (mesmo lock)
 ```
 
@@ -53,6 +53,36 @@ Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê da
   `results_spec`) validado por schema no boot. Manifest inválido → módulo não
   carrega e o erro aparece em `/saude` e no doctor.
 
+## Biblioteca de skills e plugin Bioinfo (v0.9)
+
+A aba **/skills** e o plugin **Bioinfo** (`C:\github\bioinfo-plugin`, o roteador das
+mesmas 815 skills no assistente de código) deixaram de ser duas ilhas:
+
+```
+INDICE_CONSOLIDADO.md ──reindex──► data/skills_index.json   (skills + cards de domínio)
+plugin: glossario_pt_en.json ──reindex──► data/skills_glossario.json   (cópia com sha)
+                                                  │
+        omica/skills/busca.py ◄───────────────────┘   busca no servidor, PT/EN
+          ├─ GET /api/skills  → página /skills (?q=  ?dominio=)
+          └─ Professor: pedido fora do catálogo → receitas da biblioteca (sem LLM)
+modules/<id>/manifest.yaml: skills_dominios ──► "skills relacionadas" no módulo
+                                             └► lido pelo plugin: catálogo vem ANTES da biblioteca
+```
+
+- **Busca em português**: o índice é em inglês; o glossário traduz (`metilação` →
+  `methylation`), ignora palavras de ligação e aceita a frase inteira. Sem casamento
+  total, ordena pelo termo mais raro. Fonte única do glossário = o plugin; aqui fica
+  a cópia, e o doctor (`Ponte Bioinfo (skills)`) acusa quando ela fica para trás.
+- **Elo módulo → domínio**: cada manifest declara `skills_dominios`. Domínio que a
+  biblioteca não tem reprova o doctor.
+- **Do lado do plugin**: `bioinfo_omica.py` lê estes manifests, os `status.json` e os
+  resultados (funciona com a plataforma desligada) e só submete job pela mesma rota
+  determinística dos módulos, depois de confirmação — a regra "quem propõe não
+  executa" continua valendo.
+- `omica/skills/busca.py` é **gêmea** de `bioinfo_find.py` do plugin (um roda no
+  container, o outro no host). Quem mudar a regra de casamento muda nos dois; o
+  `bioinfo_doctor.py` do plugin compara os resultados.
+
 ## Regras do projeto (anti-lições da auditoria de 2026-09-01)
 
 1. **UMA config**: tudo passa por `omica/config.py` (ambiente > `.env` > defaults).
@@ -82,6 +112,7 @@ Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê da
 | 5 | ML (nested CV+SHAP+painel mínimo, **bal.acc 0,948** Angus×Nelore real — XGBoost com o painel COMPLETO de 311 variantes; o painel mínimo de 50 dá 0,939), **/skills** (815 offline), doctor v2 + /diagnostico, glossário fundido (40 termos), **modo aula** executável, gate de publicação | ✅ 0.6.0 |
 | — | Backlog do plano: HOMER (motifs), MOFA2 (promotor × corpo), robustez ML A1/A2/A3 | ✅ 0.7.0 |
 | — | **Auditoria adversarial** (12 dimensões, 95 achados) → correções científicas, selo com lastro, gate de credenciais | ✅ 0.8.0 |
+| — | **Ponte com o plugin Bioinfo**: busca PT/EN em /skills (servidor), guias de domínio, elo módulo→domínio no manifest, Professor aponta a biblioteca quando o catálogo não cobre | ✅ 0.9.0 |
 
 **Plano de 2026-09-01: fases 0–5 e backlog completos.** Pendência declarada com
 motivo no manifest: nf-core DinD (o acervo legado de 34 amostras é reaproveitado).

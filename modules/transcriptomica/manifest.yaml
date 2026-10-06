@@ -17,6 +17,10 @@ descricao_pt: >-
 descricao_en: >-
   Bulk RNA-seq: QC (FastQC/MultiQC), SRA download, Salmon quantification and
   differential expression (DESeq2) — reusing the legacy nf-core sub03 archive.
+# Domínios da biblioteca de skills que este módulo cobre (elo com /skills e com o
+# plugin Bioinfo): quem procura receita nesses domínios é avisado de que há análise
+# pronta aqui.
+skills_dominios: [rnaseq-bulk, reads-align, databases]
 fases:
   - id: tra_fase1
     nome: Fase 1 · Aquisição e QC

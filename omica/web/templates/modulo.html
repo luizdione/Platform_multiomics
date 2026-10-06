@@ -74,6 +74,14 @@
 </section>
 {% endif %}
 
+{% if skills_modulo %}
+<h2>🧰 {{ t('skills_relacionadas', lang) }}</h2>
+<section class="fase">
+  <p>{{ t('skills_relacionadas_sub', lang) }}</p>
+  <p>{% for d, n in skills_modulo %}<a href="/skills?dominio={{ d }}&lang={{ lang }}"><code>{{ d }}</code>{% if n %} ({{ n }}){% endif %}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+</section>
+{% endif %}
+
 {% if m.results_spec %}
 <h2>{{ t('resultados_modulo', lang) }}</h2>
 {% for rotulo, tipo, dados in resultados %}

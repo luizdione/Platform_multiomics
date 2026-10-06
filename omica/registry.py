@@ -111,6 +111,11 @@ class Manifest(BaseModel):
     ordem: int = 99
     descricao_pt: str = ""
     descricao_en: str = ""
+    # Domínios da biblioteca de skills (data/skills_index.json) que este módulo cobre.
+    # É o elo com /skills ("skills relacionadas" na página do módulo) e o que o plugin
+    # Bioinfo lê para saber que um pedido desse domínio já tem análise pronta aqui,
+    # antes de buscar receita genérica. Domínio inexistente é pego pelo doctor.
+    skills_dominios: list[str] = Field(default_factory=list)
     fases: list[Fase] = Field(default_factory=list)
     scripts: list[ScriptSpec] = Field(default_factory=list)
     workflows: list[WorkflowSpec] = Field(default_factory=list)

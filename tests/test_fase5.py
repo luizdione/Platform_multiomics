@@ -15,11 +15,14 @@ def _client():
     return TestClient(app)
 
 
-def test_pagina_skills_embute_indice_offline():
+def test_pagina_skills_so_traz_o_cabecalho():
+    # a lista vem de /api/skills (busca no servidor, PT/EN); o índice inteiro
+    # embutido pesava 330 KB por abertura e só casava em inglês
     r = _client().get("/skills")
     assert r.status_code == 200
     assert "815 skills" in r.text
-    assert "dados-skills" in r.text  # JSON embutido — busca sem rede
+    assert "dados-skills" not in r.text and "/static/skills.js" in r.text
+    assert len(r.text) < 40_000
 
 
 def test_indice_skills_versionado_integro():

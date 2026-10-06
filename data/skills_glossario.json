@@ -1,0 +1,1131 @@
+{
+ "_meta": {
+  "aviso": "CÓPIA gerada por `python -m omica reindex`. Edite a origem, nunca este arquivo.",
+  "origem": "plugin Bioinfo — data/glossario_pt_en.json",
+  "sha256": "6b2143a311fa4781b0900b1fcb019343fd898807b48e2980e49a23158b0c4e4e",
+  "copiado_em": "2026-10-05T18:37:54",
+  "n_termos": 297
+ },
+ "stopwords": [
+  "a",
+  "ajuda",
+  "ajudar",
+  "algum",
+  "alguma",
+  "an",
+  "analisar",
+  "analise",
+  "analises",
+  "analyse",
+  "analyses",
+  "analysis",
+  "analyze",
+  "and",
+  "ao",
+  "aos",
+  "are",
+  "arquivo",
+  "arquivos",
+  "as",
+  "be",
+  "cada",
+  "can",
+  "com",
+  "como",
+  "da",
+  "dado",
+  "dados",
+  "das",
+  "data",
+  "de",
+  "dessa",
+  "desse",
+  "desta",
+  "deste",
+  "do",
+  "dos",
+  "e",
+  "em",
+  "entre",
+  "essa",
+  "essas",
+  "esse",
+  "esses",
+  "esta",
+  "estas",
+  "este",
+  "estes",
+  "eu",
+  "executar",
+  "existe",
+  "existem",
+  "faca",
+  "faco",
+  "favor",
+  "faz",
+  "fazer",
+  "for",
+  "from",
+  "get",
+  "gostaria",
+  "have",
+  "help",
+  "how",
+  "i",
+  "in",
+  "is",
+  "isso",
+  "isto",
+  "it",
+  "ja",
+  "like",
+  "mais",
+  "me",
+  "meu",
+  "meus",
+  "minha",
+  "minhas",
+  "muito",
+  "my",
+  "na",
+  "nas",
+  "need",
+  "nessa",
+  "nesse",
+  "nesta",
+  "neste",
+  "no",
+  "nos",
+  "o",
+  "of",
+  "on",
+  "onde",
+  "os",
+  "ou",
+  "para",
+  "partir",
+  "pela",
+  "pelas",
+  "pelo",
+  "pelos",
+  "please",
+  "pode",
+  "por",
+  "posso",
+  "preciso",
+  "quais",
+  "qual",
+  "que",
+  "queria",
+  "quero",
+  "roda",
+  "rodar",
+  "rode",
+  "run",
+  "saber",
+  "se",
+  "sem",
+  "seu",
+  "sobre",
+  "sua",
+  "tambem",
+  "tem",
+  "tenho",
+  "ter",
+  "that",
+  "the",
+  "this",
+  "to",
+  "todas",
+  "todos",
+  "tudo",
+  "um",
+  "uma",
+  "usando",
+  "usar",
+  "use",
+  "using",
+  "vamos",
+  "ver",
+  "voce",
+  "vou",
+  "want",
+  "what",
+  "which",
+  "with",
+  "would",
+  "you"
+ ],
+ "termos": {
+  "metilacao": [
+   "methylation"
+  ],
+  "variante": [
+   "variant"
+  ],
+  "variantes": [
+   "variant"
+  ],
+  "chamada": [
+   "calling",
+   "caller"
+  ],
+  "anotacao": [
+   "annotation"
+  ],
+  "montagem": [
+   "assembly"
+  ],
+  "alinhamento": [
+   "alignment",
+   "align"
+  ],
+  "expressao": [
+   "expression"
+  ],
+  "diferencial": [
+   "differential"
+  ],
+  "leitura": [
+   "read"
+  ],
+  "leituras": [
+   "read"
+  ],
+  "sequenciamento": [
+   "sequencing"
+  ],
+  "cobertura": [
+   "coverage"
+  ],
+  "qualidade": [
+   "quality",
+   "qc"
+  ],
+  "filtragem": [
+   "filter"
+  ],
+  "normalizacao": [
+   "normaliz"
+  ],
+  "quantificacao": [
+   "quantif"
+  ],
+  "contagem": [
+   "count"
+  ],
+  "matriz": [
+   "matrix"
+  ],
+  "banco": [
+   "database"
+  ],
+  "bancos": [
+   "database"
+  ],
+  "filogenia": [
+   "phylogen"
+  ],
+  "filogenetica": [
+   "phylogen"
+  ],
+  "filogenetico": [
+   "phylogen"
+  ],
+  "arvore": [
+   "tree"
+  ],
+  "selecao": [
+   "selection"
+  ],
+  "pangenoma": [
+   "pangenome"
+  ],
+  "sintenia": [
+   "synteny"
+  ],
+  "ortologo": [
+   "ortholog"
+  ],
+  "ortologia": [
+   "ortholog"
+  ],
+  "genoma": [
+   "genome"
+  ],
+  "comparativa": [
+   "comparative"
+  ],
+  "datacao": [
+   "dating",
+   "divergence"
+  ],
+  "repetitivo": [
+   "repeat"
+  ],
+  "transposon": [
+   "transposable",
+   "repeat"
+  ],
+  "proteina": [
+   "protein"
+  ],
+  "proteinas": [
+   "protein"
+  ],
+  "estrutura": [
+   "structur"
+  ],
+  "estrutural": [
+   "structur"
+  ],
+  "acoplamento": [
+   "docking"
+  ],
+  "triagem": [
+   "screen"
+  ],
+  "dinamica": [
+   "dynamics"
+  ],
+  "ligante": [
+   "ligand"
+  ],
+  "predicao": [
+   "predict"
+  ],
+  "afinidade": [
+   "affinity",
+   "binding"
+  ],
+  "celula": [
+   "cell"
+  ],
+  "celulas": [
+   "cell"
+  ],
+  "unicelular": [
+   "single-cell"
+  ],
+  "espacial": [
+   "spatial"
+  ],
+  "trajetoria": [
+   "trajectory"
+  ],
+  "agrupamento": [
+   "cluster"
+  ],
+  "lote": [
+   "batch"
+  ],
+  "lotes": [
+   "batch"
+  ],
+  "integracao": [
+   "integration"
+  ],
+  "marcador": [
+   "marker"
+  ],
+  "marcadores": [
+   "marker"
+  ],
+  "deconvolucao": [
+   "deconvolution"
+  ],
+  "cromatina": [
+   "chromatin"
+  ],
+  "acessibilidade": [
+   "accessib"
+  ],
+  "pico": [
+   "peak"
+  ],
+  "picos": [
+   "peak"
+  ],
+  "bissulfito": [
+   "bisulfite"
+  ],
+  "metagenomica": [
+   "metagenom"
+  ],
+  "microbioma": [
+   "microbiome"
+  ],
+  "taxonomia": [
+   "taxonom"
+  ],
+  "taxonomica": [
+   "taxonom"
+  ],
+  "resistoma": [
+   "resistome",
+   "amr"
+  ],
+  "hospedeiro": [
+   "host"
+  ],
+  "contaminacao": [
+   "contamination",
+   "decontam"
+  ],
+  "primer": [
+   "primer"
+  ],
+  "primers": [
+   "primer"
+  ],
+  "iniciador": [
+   "primer"
+  ],
+  "plasmideo": [
+   "plasmid"
+  ],
+  "restricao": [
+   "restriction"
+  ],
+  "guia": [
+   "grna",
+   "guide"
+  ],
+  "nocaute": [
+   "knockout"
+  ],
+  "edicao": [
+   "editing"
+  ],
+  "traducao": [
+   "translation"
+  ],
+  "splicing": [
+   "splic"
+  ],
+  "alternativo": [
+   "alternative",
+   "splic"
+  ],
+  "enriquecimento": [
+   "enrichment"
+  ],
+  "via": [
+   "pathway"
+  ],
+  "vias": [
+   "pathway"
+  ],
+  "metabolica": [
+   "metabol"
+  ],
+  "metabolico": [
+   "metabol"
+  ],
+  "multiomica": [
+   "multi-omic",
+   "multiomic"
+  ],
+  "proteomica": [
+   "proteom"
+  ],
+  "metabolomica": [
+   "metabolom"
+  ],
+  "rede": [
+   "network"
+  ],
+  "imunologico": [
+   "immun"
+  ],
+  "imuno": [
+   "immun"
+  ],
+  "citometria": [
+   "cytometry"
+  ],
+  "epitopo": [
+   "epitope"
+  ],
+  "imagem": [
+   "imag"
+  ],
+  "segmentacao": [
+   "segment"
+  ],
+  "populacional": [
+   "population"
+  ],
+  "herdabilidade": [
+   "heritability"
+  ],
+  "imputacao": [
+   "imputation"
+  ],
+  "faseamento": [
+   "phasing"
+  ],
+  "ancestralidade": [
+   "ancestry"
+  ],
+  "clinica": [
+   "clinic"
+  ],
+  "clinico": [
+   "clinic"
+  ],
+  "farmacogenomica": [
+   "pharmacogenom"
+  ],
+  "sobrevivencia": [
+   "surviv"
+  ],
+  "laudo": [
+   "report"
+  ],
+  "patogenicidade": [
+   "pathogenic"
+  ],
+  "estatistica": [
+   "statistic"
+  ],
+  "estatistico": [
+   "statistic"
+  ],
+  "aprendizado": [
+   "learning"
+  ],
+  "poder": [
+   "power"
+  ],
+  "amostra": [
+   "sample"
+  ],
+  "amostral": [
+   "sample"
+  ],
+  "validacao": [
+   "validation"
+  ],
+  "modelo": [
+   "model"
+  ],
+  "visualizacao": [
+   "visualiz",
+   "matplotlib",
+   "ggplot",
+   "plotting",
+   "plots",
+   "plotly",
+   "nanoplot",
+   "chart"
+  ],
+  "grafico": [
+   "matplotlib",
+   "ggplot",
+   "plotting",
+   "plots",
+   "plotly",
+   "nanoplot",
+   "chart",
+   "visualiz"
+  ],
+  "relatorio": [
+   "report"
+  ],
+  "figura": [
+   "figure"
+  ],
+  "manuscrito": [
+   "manuscript"
+  ],
+  "artigo": [
+   "manuscript",
+   "paper"
+  ],
+  "escrita": [
+   "writing"
+  ],
+  "redacao": [
+   "writing"
+  ],
+  "revisao": [
+   "review"
+  ],
+  "fluxo": [
+   "workflow",
+   "pipeline"
+  ],
+  "automacao": [
+   "automation"
+  ],
+  "unica": [
+   "single"
+  ],
+  "unico": [
+   "single"
+  ],
+  "individual": [
+   "single"
+  ],
+  "dge": [
+   "differential+expression"
+  ],
+  "deg": [
+   "differential+expression"
+  ],
+  "scrnaseq": [
+   "single-cell"
+  ],
+  "scrna": [
+   "single-cell"
+  ],
+  "wgbs": [
+   "bisulfite",
+   "methylation"
+  ],
+  "emseq": [
+   "methylation"
+  ],
+  "wgs": [
+   "whole-genome",
+   "germline"
+  ],
+  "wes": [
+   "exome"
+  ],
+  "snv": [
+   "variant"
+  ],
+  "cnv": [
+   "copy-number",
+   "cnv"
+  ],
+  "sv": [
+   "structural+variant"
+  ],
+  "gwas": [
+   "gwas"
+  ],
+  "prs": [
+   "polygenic"
+  ],
+  "mr": [
+   "mendelian"
+  ],
+  "qtl": [
+   "qtl"
+  ],
+  "amr": [
+   "resistome",
+   "resistance"
+  ],
+  "msa": [
+   "multiple+alignment",
+   "mafft"
+  ],
+  "md": [
+   "dynamics"
+  ],
+  "ppi": [
+   "protein-protein",
+   "interaction"
+  ],
+  "ms": [
+   "mass+spectrometry",
+   "proteom"
+  ],
+  "atac": [
+   "atac"
+  ],
+  "chip": [
+   "chip"
+  ],
+  "integrar": [
+   "integrat"
+  ],
+  "alinhar": [
+   "align"
+  ],
+  "montar": [
+   "assembl"
+  ],
+  "anotar": [
+   "annotat"
+  ],
+  "chamar": [
+   "calling",
+   "caller"
+  ],
+  "filtrar": [
+   "filter"
+  ],
+  "normalizar": [
+   "normaliz"
+  ],
+  "quantificar": [
+   "quantif"
+  ],
+  "agrupar": [
+   "cluster"
+  ],
+  "predizer": [
+   "predict"
+  ],
+  "prever": [
+   "predict"
+  ],
+  "comparar": [
+   "compar"
+  ],
+  "visualizar": [
+   "visualiz",
+   "matplotlib",
+   "ggplot",
+   "plotting",
+   "plots",
+   "plotly",
+   "nanoplot",
+   "chart"
+  ],
+  "plotar": [
+   "matplotlib",
+   "ggplot",
+   "plotting",
+   "plots",
+   "plotly",
+   "nanoplot",
+   "chart"
+  ],
+  "sequenciar": [
+   "sequencing"
+  ],
+  "classificar": [
+   "classif"
+  ],
+  "baixar": [
+   "download",
+   "fetch",
+   "retriev"
+  ],
+  "converter": [
+   "convert"
+  ],
+  "mapear": [
+   "mapping",
+   "align"
+  ],
+  "aparar": [
+   "trim"
+  ],
+  "trimar": [
+   "trim"
+  ],
+  "deduplicar": [
+   "dedup",
+   "duplicate"
+  ],
+  "detectar": [
+   "detect"
+  ],
+  "identificar": [
+   "identif"
+  ],
+  "simular": [
+   "simulat"
+  ],
+  "desenhar": [
+   "design"
+  ],
+  "desenho": [
+   "design"
+  ],
+  "treinar": [
+   "training"
+  ],
+  "corrigir": [
+   "correct"
+  ],
+  "correcao": [
+   "correct"
+  ],
+  "remover": [
+   "remov"
+  ],
+  "mesclar": [
+   "merge",
+   "merging"
+  ],
+  "fundir": [
+   "merge",
+   "merging"
+  ],
+  "estimar": [
+   "estimat"
+  ],
+  "inferir": [
+   "infer"
+  ],
+  "imputar": [
+   "imput"
+  ],
+  "fasear": [
+   "phasing",
+   "phased"
+  ],
+  "enriquecer": [
+   "enrichment"
+  ],
+  "demultiplexar": [
+   "demultiplex"
+  ],
+  "deconvoluir": [
+   "deconvol"
+  ],
+  "validar": [
+   "validat"
+  ],
+  "anotando": [
+   "annotat"
+  ],
+  "transcrito": [
+   "transcript"
+  ],
+  "transcritos": [
+   "transcript"
+  ],
+  "transcriptoma": [
+   "transcriptom"
+  ],
+  "transcriptomica": [
+   "transcriptom",
+   "rna-seq"
+  ],
+  "genomica": [
+   "genom"
+  ],
+  "epigenomica": [
+   "epigen"
+  ],
+  "metiloma": [
+   "methylation"
+  ],
+  "isoforma": [
+   "isoform"
+  ],
+  "isoformas": [
+   "isoform"
+  ],
+  "mutacao": [
+   "mutation",
+   "variant"
+  ],
+  "mutacoes": [
+   "mutation",
+   "variant"
+  ],
+  "somatica": [
+   "somatic"
+  ],
+  "somatico": [
+   "somatic"
+  ],
+  "germinativa": [
+   "germline"
+  ],
+  "germinativo": [
+   "germline"
+  ],
+  "raca": [
+   "population",
+   "ancestry"
+  ],
+  "racas": [
+   "population",
+   "ancestry"
+  ],
+  "painel": [
+   "panel"
+  ],
+  "paineis": [
+   "panel"
+  ],
+  "frequencia": [
+   "frequenc"
+  ],
+  "frequencias": [
+   "frequenc"
+  ],
+  "alelo": [
+   "allele",
+   "allelic"
+  ],
+  "alelica": [
+   "allele",
+   "allelic"
+  ],
+  "alelico": [
+   "allele",
+   "allelic"
+  ],
+  "haplotipo": [
+   "haplotyp"
+  ],
+  "haplotipos": [
+   "haplotyp"
+  ],
+  "ligacao": [
+   "linkage"
+  ],
+  "desequilibrio": [
+   "disequilibrium",
+   "linkage"
+  ],
+  "associacao": [
+   "association"
+  ],
+  "fenotipo": [
+   "phenotyp"
+  ],
+  "genotipo": [
+   "genotyp"
+  ],
+  "genotipagem": [
+   "genotyp"
+  ],
+  "estratificacao": [
+   "stratif",
+   "population+structure"
+  ],
+  "parentesco": [
+   "relatedness"
+  ],
+  "motivo": [
+   "motif"
+  ],
+  "motivos": [
+   "motif"
+  ],
+  "promotor": [
+   "promoter"
+  ],
+  "promotores": [
+   "promoter"
+  ],
+  "potenciador": [
+   "enhancer"
+  ],
+  "histona": [
+   "histone"
+  ],
+  "histonas": [
+   "histone"
+  ],
+  "nucleossomo": [
+   "nucleosome"
+  ],
+  "copias": [
+   "copy-number",
+   "cnv"
+  ],
+  "bacteria": [
+   "bacteri"
+  ],
+  "bacteriano": [
+   "bacteri"
+  ],
+  "bacteriana": [
+   "bacteri"
+  ],
+  "patogeno": [
+   "pathogen"
+  ],
+  "vacina": [
+   "vaccin"
+  ],
+  "anticorpo": [
+   "antibod"
+  ],
+  "anticorpos": [
+   "antibod"
+  ],
+  "antigeno": [
+   "antigen"
+  ],
+  "farmaco": [
+   "drug",
+   "compound"
+  ],
+  "droga": [
+   "drug",
+   "compound"
+  ],
+  "medicamento": [
+   "drug"
+  ],
+  "molecula": [
+   "molecul"
+  ],
+  "moleculas": [
+   "molecul"
+  ],
+  "composto": [
+   "compound"
+  ],
+  "dobramento": [
+   "structure+prediction",
+   "alphafold",
+   "esmfold"
+  ],
+  "enovelamento": [
+   "structure+prediction",
+   "alphafold",
+   "esmfold"
+  ],
+  "interacao": [
+   "interact"
+  ],
+  "interacoes": [
+   "interact"
+  ],
+  "complexo": [
+   "complex"
+  ],
+  "energia": [
+   "energy"
+  ],
+  "simulacao": [
+   "simulat"
+  ],
+  "espectrometria": [
+   "spectrometry"
+  ],
+  "massa": [
+   "mass"
+  ],
+  "massas": [
+   "mass"
+  ],
+  "peptideo": [
+   "peptide"
+  ],
+  "peptideos": [
+   "peptide"
+  ],
+  "metabolito": [
+   "metabolit"
+  ],
+  "metabolitos": [
+   "metabolit"
+  ],
+  "microscopia": [
+   "microscop"
+  ],
+  "amostragem": [
+   "sampling"
+  ],
+  "regressao": [
+   "regress"
+  ],
+  "correlacao": [
+   "correlat"
+  ],
+  "hipotese": [
+   "hypothes"
+  ],
+  "comparacoes": [
+   "comparison",
+   "multiple+testing"
+  ],
+  "bayesiano": [
+   "bayes"
+  ],
+  "bayesiana": [
+   "bayes"
+  ],
+  "misto": [
+   "mixed"
+  ],
+  "mistos": [
+   "mixed"
+  ],
+  "logistica": [
+   "logistic"
+  ],
+  "reducao": [
+   "reduction"
+  ],
+  "dimensionalidade": [
+   "dimension"
+  ],
+  "componentes": [
+   "component",
+   "pca"
+  ],
+  "principais": [
+   "pca"
+  ],
+  "longa": [
+   "long-read"
+  ],
+  "longas": [
+   "long-read"
+  ],
+  "curta": [
+   "short"
+  ],
+  "curtas": [
+   "short"
+  ],
+  "nanoporo": [
+   "nanopore"
+  ],
+  "referencia": [
+   "reference"
+  ],
+  "indice": [
+   "index"
+  ],
+  "duplicata": [
+   "duplicate",
+   "dedup"
+  ],
+  "duplicatas": [
+   "duplicate",
+   "dedup"
+  ],
+  "adaptador": [
+   "adapter"
+  ],
+  "adaptadores": [
+   "adapter"
+  ],
+  "publicacao": [
+   "publication"
+  ],
+  "periodico": [
+   "journal"
+  ],
+  "revista": [
+   "journal"
+  ],
+  "citacao": [
+   "citation"
+  ],
+  "bibliografia": [
+   "reference"
+  ],
+  "ensaio": [
+   "assay",
+   "trial"
+  ],
+  "ensaios": [
+   "assay",
+   "trial"
+  ],
+  "conteiner": [
+   "container",
+   "docker"
+  ]
+ }
+}

@@ -13,7 +13,7 @@ import asyncio
 from pathlib import Path
 
 import markdown as md
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -24,6 +24,7 @@ from omica.config import REPO_ROOT, get_config
 from omica.jobs import dispatch, guarda_ram, queue
 from omica.registry import STATUS_TYPES, load_registry
 from omica.results import carregar_tabela, resultado_de_job, resultado_do_modulo
+from omica.skills import busca
 from omica.web.flux import svg_do_modulo
 from omica.web.i18n import normalizar_lang, t
 
@@ -72,8 +73,12 @@ def modulo(request: Request, mod_id: str):
             resultados.append((rotulo, "link", f"/resultados/{rel}" if existe else None))
         else:
             resultados.append((rotulo, "tabela", carregar_tabela(rel)))
+    # elo declarado no manifest → domínios da biblioteca, com a contagem lida do índice
+    contagem = (busca.carregar_indice() or {}).get("dominios", {})
+    skills_modulo = [(d, contagem.get(d)) for d in m.skills_dominios]
     return _render(request, "modulo.html", m=m, fluxo_svg=svg_do_modulo(m),
-                   resultados=resultados, aviso=request.query_params.get("aviso"))
+                   resultados=resultados, aviso=request.query_params.get("aviso"),
+                   skills_modulo=skills_modulo)
 
 
 @app.post("/modulos/{mod_id}/scripts/{script_key}")
@@ -115,10 +120,12 @@ def professor_home(request: Request):
 
 
 @app.post("/professor/perguntar", response_class=HTMLResponse)
-async def professor_perguntar(request: Request):
-    form = await request.form()
-    frase = str(form.get("frase", "")).strip()
-    arquivo = str(form.get("arquivo", "")).strip()
+def professor_perguntar(request: Request, frase: str = Form(""), arquivo: str = Form("")):
+    # Rota SÍNCRONA de propósito (o Starlette a roda num thread do pool): como `async def`
+    # (até a 0.8.0), o motor local e a busca na biblioteca rodavam dentro do event loop e
+    # o servidor inteiro parava enquanto o Professor pensava.
+    frase = frase.strip()
+    arquivo = arquivo.strip()
     resposta = prof.perguntar(frase, arquivo) if frase else None
     ok, modelo = prof.motor_disponivel()
     return _render(request, "professor.html", motor_ok=ok, modelo=modelo,
@@ -223,16 +230,27 @@ def _saude_dados() -> dict:
 
 @app.get("/skills", response_class=HTMLResponse)
 def skills(request: Request):
-    indice_path = REPO_ROOT / "data" / "skills_index.json"
-    if not indice_path.exists():
+    """Só o cabeçalho sai daqui; a lista vem de /api/skills. A página já foi o índice
+    inteiro (330 KB) embutido, com busca por substring no navegador — que devolvia
+    zero para "metilação", porque o índice é em inglês. `?q=` e `?dominio=` deixam a
+    busca endereçável (é como a página do módulo e o Professor apontam para cá)."""
+    indice = busca.carregar_indice()
+    if indice is None:
         return RedirectResponse("/?lang=" + _lang(request), status_code=303)
-    bruto = indice_path.read_text(encoding="utf-8")
-    import json as _json
+    return _render(request, "skills.html", indice=indice,
+                   q=request.query_params.get("q", ""),
+                   dominio=request.query_params.get("dominio", ""),
+                   tem_glossario=bool(busca.carregar_glossario()[0]))
 
-    indice = _json.loads(bruto)
-    # </script> dentro de descrição quebraria o bloco embutido — escapa por segurança
-    seguro = bruto.replace("</", "<\\/")
-    return _render(request, "skills.html", indice=indice, skills_json=seguro)
+
+@app.get("/api/skills")
+def api_skills(q: str = "", dominio: str = "", n: int = busca.LIMITE_PADRAO):
+    """Busca determinística nas skills, em português ou inglês (omica.skills.busca).
+    Junto vêm os cards do domínio escolhido — quando usar, regras duras e stack."""
+    resultado = busca.buscar(q, dominio=dominio, limite=max(0, n))
+    cards = (busca.carregar_indice() or {}).get("cards", {})
+    resultado["cards"] = cards.get(dominio, []) if dominio else []
+    return JSONResponse(resultado)
 
 
 @app.get("/skills/{pasta:path}", response_class=HTMLResponse)
@@ -243,9 +261,19 @@ def skill_detalhe(request: Request, pasta: str):
     caminho = (base / pasta / "SKILL.md").resolve()
     if not caminho.is_file() or base not in caminho.parents:
         return RedirectResponse("/skills", status_code=303)
-    corpo = md.markdown(caminho.read_text(encoding="utf-8", errors="replace"),
-                        extensions=["tables", "fenced_code"])
-    return _render(request, "ajuda_doc.html", doc=f"skills/{pasta}", corpo=corpo)
+    # O SKILL.md abre com front-matter YAML (name/description/...): renderizado como
+    # Markdown virava um parágrafo cru no topo. A descrição completa vai para o cabeçalho
+    # — o índice a trunca em 140 caracteres.
+    meta, corpo_md = _separar_frontmatter(caminho.read_text(encoding="utf-8", errors="replace"))
+    corpo = md.markdown(corpo_md, extensions=["tables", "fenced_code"])
+    # contexto da skill: de que domínio é e se a plataforma já tem análise pronta nele
+    indice = busca.carregar_indice() or {}
+    skill = next((s for s in indice.get("skills", []) if s["pasta"] == pasta.strip("/")), None)
+    modulos = [m for m in load_registry().modules
+               if skill and skill["dominio"] in m.skills_dominios]
+    return _render(request, "ajuda_doc.html", doc=f"skills/{pasta}", corpo=corpo,
+                   skill=skill, modulos_skill=modulos,
+                   skill_descricao=str(meta.get("description") or ""))
 
 
 @app.get("/glossario", response_class=HTMLResponse)
