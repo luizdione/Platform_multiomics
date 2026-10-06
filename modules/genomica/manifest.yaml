@@ -175,9 +175,9 @@ workflows:
       Extração das variantes do painel demo → frequências AF/MAF → anotação
       funcional SnpEff. Cada passo consome o arquivo de saída do anterior.
     passos: [extracao_demo, frequencias_demo, anotacao_demo]
-    testado_em: "2026-09-02"
-    testado_por: "Claude (fila real: 52.881 variantes → 41 efeitos distintos)"
-    hash_scripts: "220c3f92838d7e83"
+    testado_em: "2026-10-06"
+    testado_por: "Claude (fila bioinfo real, re-execução pós-auditoria: 52.881 variantes → 41 efeitos distintos; MAF multialélica corrigida)"
+    hash_scripts: "46124beee606ccc6"
     nota_didatica: >-
       O mesmo desenho vale para um painel real: troque o BED demo pelo BED gerado
       em "Painel de genes → BED" e o restante do fluxo não muda.

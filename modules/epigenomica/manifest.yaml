@@ -162,9 +162,9 @@ workflows:
       Preparação das duas views de metilação por gene → MOFA2 com 3 fatores e
       variância explicada por view.
     passos: [mofa_preparar_demo, mofa_rodar_demo]
-    testado_em: "2026-09-04"
-    testado_por: "Claude (fila methyl real; separação Nelore×HF = 1,12 no Fator 1)"
-    hash_scripts: "9b4767349b6cdbd1"
+    testado_em: "2026-10-06"
+    testado_por: "Claude (fila methyl real, re-execução pós-auditoria; separação Nelore×HF = 1,25 no Fator 1)"
+    hash_scripts: "89df0a07439b5f96"
     nota_didatica: >-
       MOFA é análise multi-view: aqui as views são promotor × corpo gênico
       (pareadas por amostra de verdade); com animais WGS+RRBS, uma view vira a
@@ -175,9 +175,9 @@ workflows:
       DMCs Nelore×Holstein (methylKit) → interseção com as janelas ±15 kb do
       painel 108 versionado. O metaperfil TSS roda à parte sobre os mesmos dados.
     passos: [dmc_demo, intersecao_demo]
-    testado_em: "2026-09-02"
-    testado_por: "Claude (fila methyl real, depends_on: DMC → interseção painel 108)"
-    hash_scripts: "62f2817b0a5d5654"
+    testado_em: "2026-10-06"
+    testado_por: "Claude (fila methyl real, depends_on: DMC → interseção; re-execução pós-auditoria: 275 DMCs, 229 no painel 108 em 43 genes, cada DMC contada uma vez)"
+    hash_scripts: "ef8e5355bc92acc7"
     nota_didatica: >-
       Os coverages demo são dados REAIS do depósito Zenodo do paper (CD4,
       filtrados) — os mesmos limiares do manuscrito (|diff|>15%, q<0,05).

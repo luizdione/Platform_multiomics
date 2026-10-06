@@ -71,6 +71,22 @@ esta versão traz a solução para cá sem criar uma segunda fonte.
   biblioteca reais: `conftest.py` aponta `BIOINFO_PLUGIN_DIR` para um caminho
   inexistente.
 
+### Selos e resultados publicados (re-execução de 2026-10-05/06)
+- Os 4 workflows com selo vencido desde a auditoria (`genomica/wf_painel_demo`,
+  `epigenomica/wf_metilacao_demo`, `epigenomica/wf_mofa_demo`,
+  `transcriptomica/wf_de_granulosa`) e os 5 scripts avulsos cujo resultado era
+  mais velho que o script (integridade 1000BG, Fst Angus×Nelore, metaperfil TSS,
+  motifs HOMER, Salmon quant) foram re-executados NA PLATAFORMA (fila RQ, workers
+  de container, submetidos pela ponte do plugin Bioinfo) — 25 arquivos
+  regenerados. Só então `python -m omica selos --gravar` recarimbou
+  `hash_scripts`, e `testado_em`/`testado_por` passaram a dizer o dia e os
+  números da re-execução. O que mudou no que estava publicado: `fst_top.tsv` só
+  lista variantes com Fst finito e OBS_CT ≥ 249 (antes trazia NaN no topo); a
+  interseção DMC × painel conta cada DMC uma vez (229 de 275 DMCs em 43 genes);
+  MAF multialélica pela definição corrigida; perfil TSS com a fita invertida.
+- Resto de teste `work/jobs/epi-intersecao_demo-2` (queued desde 14/09, 6 GB
+  presos no orçamento de RAM) removido.
+
 ## [0.8.0] — 2026-09-14 · Auditoria adversarial: correções científicas e validadores que reprovam
 
 Auditoria de 12 dimensões com verificação adversarial por achado (95 achados

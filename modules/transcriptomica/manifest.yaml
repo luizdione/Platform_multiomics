@@ -140,9 +140,9 @@ workflows:
       DESeq2 sobre a matriz real granulosa (verão × inverno) → volcano plot com
       os genes mais significativos destacados.
     passos: [deseq2_demo, volcano_demo]
-    testado_em: "2026-09-03"
-    testado_por: "Claude (fila methyl real, depends_on: DESeq2 → volcano)"
-    hash_scripts: "ed588208ce708a64"
+    testado_em: "2026-10-06"
+    testado_por: "Claude (fila methyl real, depends_on: DESeq2 → volcano; re-execução pós-auditoria: 16.350 genes, 2.393 DEGs com padj<0,05 e |LFC|≥1)"
+    hash_scripts: "ef51927233d11997"
     nota_didatica: >-
       O contraste é o do paper do sub03: células da granulosa de vacas Angus sob
       calor de verão vs inverno — os DEGs aqui são os mesmos que alimentaram o

@@ -126,9 +126,10 @@ Workflows encadeados e selados: `genomica/wf_painel_demo`,
 Professor Ômico. Demos usam DADOS REAIS versionados (fatia do 1000 Bull Genomes
 Run 8 e coverages Bismark do Zenodo do autor).
 
-> ⚠️ **Selos vencidos pela auditoria (v0.8.0).** As correções científicas
-> mudaram scripts de 4 dos 5 workflows selados, então `python -m omica doctor`
-> passa a acusar `Selos de workflow: 4 vencido(s) — re-executar`. **Os números
-> publicados desses workflows ainda são os da versão anterior.** Re-executar na
-> plataforma (ou pelos smokes de container) e só então recarimbar o
-> `hash_scripts` do manifest. O workflow `ml/wf_ml_aims` não foi afetado.
+> ✅ **Selos recarimbados em 2026-10-06.** As correções científicas da auditoria
+> (v0.8.0) tinham vencido 4 dos 5 selos. Os 4 workflows e os 5 scripts avulsos
+> cujo resultado publicado era mais velho que o script foram re-executados na
+> plataforma real (fila RQ, workers de container) e só então
+> `python -m omica selos --gravar` recarimbou o `hash_scripts`: os números em
+> `results/` são os dos scripts atuais. Se um script mudar de novo, o doctor volta
+> a acusar `Selos de workflow: N vencido(s) — re-executar` — é o ciclo previsto.
