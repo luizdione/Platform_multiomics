@@ -16,6 +16,7 @@ import os
 
 import pytest
 
+from omica import config as config_mod
 from omica.config import reset_config_cache
 from omica.jobs import guarda_ram
 
@@ -36,6 +37,13 @@ def ambiente_isolado(tmp_path, monkeypatch):
     monkeypatch.setenv("BIOINFO_PLUGIN_DIR", str(tmp_path / "sem_plugin"))
     monkeypatch.delenv("OMICA_IN_DOCKER", raising=False)
     monkeypatch.setattr(guarda_ram.psutil, "virtual_memory", lambda: _MemoriaFake(12.0))
+    # O .env real nunca entra nos testes. Ele guarda o OMICA_API_TOKEN, e `_obter` faz
+    # `env or .env or default`: um OMICA_API_TOKEN="" no ambiente NÃO força "vazio" —
+    # cairia no .env e a suíte passaria a depender (e a poder imprimir) do segredo real.
+    monkeypatch.setattr(config_mod, "_ler_dotenv", lambda caminho: {})
+    monkeypatch.delenv("OMICA_API_TOKEN", raising=False)
+    # interruptor da GPU fictício: os testes nunca leem o switch.json real do autor
+    monkeypatch.setenv("OMICA_GPU_SWITCH", str(tmp_path / "gpu_switch" / "switch.json"))
     reset_config_cache()
     yield
     reset_config_cache()

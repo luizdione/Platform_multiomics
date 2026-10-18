@@ -10,7 +10,7 @@ doctor e em /saude. Nunca módulo morto silencioso.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -83,6 +83,10 @@ class ParamSpec(BaseModel):
     name: str
     rotulo: str
     default: str = ""
+    # Como o dispatch valida o valor (omica/jobs/dispatch.py::_validar_valor). Não entra
+    # no hash do selo — hash_dos_passos só lê name=default —, então declarar o tipo num
+    # script selado não vence o selo.
+    tipo: Literal["texto", "caminho", "dir", "inteiro", "decimal", "grupo"] = "texto"
 
 
 class WorkflowSpec(BaseModel):

@@ -11,7 +11,9 @@ services:
     image: omica-web
     container_name: omica-web
     ports:
-      - "${OMICA_PORT:-8710}:8710"
+      # Padrão: só a própria máquina. Antes era 0.0.0.0 (UI sem autenticação exposta na
+      # LAN). Para aula pela rede: OMICA_BIND=0.0.0.0 no .env, conscientemente.
+      - "${OMICA_BIND:-127.0.0.1}:${OMICA_PORT:-8710}:8710"
     environment:
       OMICA_IN_DOCKER: "1"
       OMICA_PORT: "8710"
@@ -20,10 +22,21 @@ services:
       SKILLS_DIR: /skills
       OMICA_REDIS_URL: redis://omica-redis:6379/0
       OMICA_MAX_RAM_GB: "${OMICA_MAX_RAM_GB:-24}"
+      # OMICA_API_TOKEN NÃO entra aqui de propósito: em `environment:` ele aparece no
+      # `docker inspect`. O app lê do /app/.env montado (omica/config.py).
     volumes:
       - ./:/app
       - "${GENOME_DATA:-E:/data}:/data"
       - "${SKILLS_DIR:-C:/Users/luizd/.claude/skills_bioinfo}:/skills:ro"
+      # interruptor da GPU do autor, só leitura (portão das chamadas a LLM local)
+      - "${OLLAMA_DELEGATE_DIR:-C:/Users/luizd/.ollama_delegate}:/gpu_switch:ro"
+    networks:
+      # `default` explícito: sem ele o web perde o Redis (omica_default).
+      - default
+      # rede interna compartilhada SÓ com o n8n — ele alcança http://omica-web:8710
+      # sem enxergar o Redis (sem senha) nem os workers. Criada fora deste compose por
+      # C:\github\n8n-infra\scripts\garantir_rede.ps1.
+      - omica_api
     depends_on:
       - redis
     restart: unless-stopped
@@ -136,3 +149,9 @@ services:
 volumes:
   epigenoma_r_lib:
     external: true  # bibliotecas R compiladas pela plataforma antiga — reuso
+
+networks:
+  # Criada FORA deste compose (n8n-infra\scripts\garantir_rede.ps1): um `docker compose
+  # down` aqui não pode apagá-la — o `docker start n8n` do scijournal passaria a falhar.
+  omica_api:
+    external: true

@@ -20,10 +20,12 @@ from fastapi.templating import Jinja2Templates
 
 from omica import __version__
 from omica import professor as prof
+from omica.api import v1 as api_v1
 from omica.config import REPO_ROOT, get_config
 from omica.jobs import dispatch, guarda_ram, queue
 from omica.registry import STATUS_TYPES, load_registry
 from omica.results import carregar_tabela, resultado_de_job, resultado_do_modulo
+from omica.saude import dados_saude
 from omica.skills import busca
 from omica.web.flux import svg_do_modulo
 from omica.web.i18n import normalizar_lang, t
@@ -33,6 +35,8 @@ DIDATICA_DIR = REPO_ROOT / "didatica" / "ajuda"
 
 app = FastAPI(title="ômica", version=__version__, docs_url="/api/docs")
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
+# API JSON para orquestradores (n8n). Exige token; sem OMICA_API_TOKEN responde 503.
+app.include_router(api_v1.router)
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
 templates.env.globals.update(t=t, versao=__version__, status_types=STATUS_TYPES)
 
@@ -214,18 +218,7 @@ def ajuda_doc(request: Request, doc: str):
 
 
 def _saude_dados() -> dict:
-    cfg = get_config()
-    reg = load_registry()
-    backend = "rq" if queue._rq_queue() is not None else "thread"
-    return {
-        "versao": __version__,
-        "ram_pct": guarda_ram.uso_ram_pct(),
-        "ram_limite_pct": cfg.ram_max_pct,
-        "fila_backend": backend,
-        "modulos_validos": len(reg.modules),
-        "erros_manifests": reg.erros,
-        "data_dir": str(cfg.data_dir),
-    }
+    return dados_saude()  # compartilhado com a API v1 (omica/saude.py)
 
 
 @app.get("/skills", response_class=HTMLResponse)

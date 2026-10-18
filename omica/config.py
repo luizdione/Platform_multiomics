@@ -31,6 +31,14 @@ _DEFAULTS = {
     # fonte única do glossário de busca PT→EN. Só o host o enxerga (não é montado nos
     # containers): lá fica vazio e a plataforma usa a cópia que o reindex deixou em data/.
     "BIOINFO_PLUGIN_DIR": "" if os.environ.get("OMICA_IN_DOCKER") else r"C:\github\bioinfo-plugin",
+    # API JSON v1 (orquestração externa, ex.: n8n). Vazio = API DESLIGADA (responde 503):
+    # falha fechada. O valor real fica só no .env (gitignored) — nunca no compose
+    # `environment:` (apareceria em `docker inspect`) nem no .env.example.
+    "OMICA_API_TOKEN": "",
+    # Interruptor da GPU do autor (convenção do LILO/ollama-delegate). Toda chamada a LLM
+    # local passa por ele. No container chega montado SOMENTE LEITURA em /gpu_switch.
+    "OMICA_GPU_SWITCH": "/gpu_switch/switch.json" if os.environ.get("OMICA_IN_DOCKER")
+                        else str(Path.home() / ".ollama_delegate" / "switch.json"),
 }
 
 
@@ -66,6 +74,10 @@ class Config:
     ollama_url: str         # motor do Professor Ômico (Ollama local, mesmo do LILO)
     ollama_model: str
     plugin_dir: Path | None  # plugin Bioinfo no host; None onde ele não existe (container, CI)
+    # repr=False: o pytest imprime `cfg = Config(...)` quando um teste falha — o token
+    # iria parar no log.
+    api_token: str = field(default="", repr=False)
+    gpu_switch: Path = field(default_factory=lambda: Path(_DEFAULTS["OMICA_GPU_SWITCH"]))
     in_docker: bool = field(default_factory=lambda: bool(os.environ.get("OMICA_IN_DOCKER")))
 
     @property
@@ -108,6 +120,8 @@ def get_config() -> Config:
         ollama_url=_obter("OMICA_OLLAMA_URL", dotenv),
         ollama_model=_obter("OMICA_OLLAMA_MODEL", dotenv),
         plugin_dir=Path(plugin) if (plugin := _obter("BIOINFO_PLUGIN_DIR", dotenv)) else None,
+        api_token=_obter("OMICA_API_TOKEN", dotenv),
+        gpu_switch=Path(_obter("OMICA_GPU_SWITCH", dotenv)),
     )
 
 

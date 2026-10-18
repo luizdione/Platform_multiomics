@@ -7,12 +7,14 @@ Nada de docker-dentro-de-docker fora do futuro profile nfcore.
 """
 from __future__ import annotations
 
+import posixpath
 import re
+import shlex
 from typing import Any, Optional
 
 from omica.config import get_config
 from omica.jobs import queue
-from omica.registry import Manifest, ScriptSpec, load_registry
+from omica.registry import Manifest, ParamSpec, ScriptSpec, load_registry
 
 # imagem → fila RQ. Worker leve (omica-web) consome "omica"; o worker
 # bioinformático (omica-bioinfo) consome "bioinfo".
@@ -57,7 +59,63 @@ def fila_para_runtime(runtime: str) -> str:
     raise RuntimeIndisponivel(f"runtime desconhecido: {runtime!r}")
 
 
-_PARAM_SEGURO = re.compile(r"^[A-Za-z0-9_\-./\\:= ]+$")  # '=' p/ convenção Nome=arquivo
+# Um valor de parâmetro vira UM token do argv: o cmd passa por shlex.split no
+# script_job. O padrão antigo (`^[A-Za-z0-9_\-./\\:= ]+$`) tinha dois furos de
+# injeção, achados nas auditorias de 2026-09-14 e 2026-10-18:
+#   - aceitava espaço: `x --outra-flag` virava dois argumentos;
+#   - não barrava '-' inicial: `--help` ou `--construir-indice`, SEM espaço nenhum,
+#     já eram lidos pelo argparse do script como flag.
+# Também fica de fora a barra invertida, que o shlex POSIX come em silêncio.
+# A '/' inicial é permitida porque os defaults usam caminhos do container
+# (/data/1000bg_vcf/...); para ONDE um caminho pode apontar quem decide é
+# _validar_caminho — `/etc/passwd` passa no formato, mas não na raiz.
+_TOKEN_SEGURO = re.compile(r"^[A-Za-z0-9_/][A-Za-z0-9_\-./:=]*$")
+_INTEIRO = re.compile(r"^-?\d+$")
+_DECIMAL = re.compile(r"^-?(\d+\.?\d*|\.\d+)([eE]-?\d+)?$")
+_RAIZ_MODULO = re.compile(r"^modules/[A-Za-z0-9_]+/(demo_data|data)(/|$)")
+
+
+def _validar_caminho(caminho: str, rotulo: str) -> None:
+    """Checagem LÉXICA (posix): os caminhos dos manifests são do container, e no host
+    (testes, CI) `/data/...` não existe — resolver no sistema de arquivos daria
+    falso-negativo. Raízes aceitas: dados curados do repo (modules/<m>/demo_data|data),
+    os dados pesados montados (/data) e o diretório de dados da plataforma."""
+    if ".." in caminho:
+        raise ValueError(f"caminho com '..' em {rotulo}: {caminho!r}")
+    v = posixpath.normpath(caminho)
+    raiz_dados = get_config().data_dir.as_posix().rstrip("/")
+    if (_RAIZ_MODULO.match(v) or v == "/data" or v.startswith("/data/")
+            or v == raiz_dados or v.startswith(raiz_dados + "/")):
+        return
+    raise ValueError(
+        f"caminho fora das raízes permitidas em {rotulo}: {caminho!r} "
+        "(use modules/<módulo>/demo_data|data/..., /data/... ou a pasta de dados da plataforma)")
+
+
+def _validar_valor(param: ParamSpec, bruto: str) -> str:
+    if not bruto:
+        raise ValueError(f"parâmetro obrigatório vazio: {param.rotulo} ({param.name})")
+    if param.tipo == "inteiro":
+        if not _INTEIRO.match(bruto):
+            raise ValueError(f"{param.rotulo} precisa ser inteiro: {bruto!r}")
+        return bruto
+    if param.tipo == "decimal":
+        if not _DECIMAL.match(bruto):
+            raise ValueError(f"{param.rotulo} precisa ser número: {bruto!r}")
+        return bruto
+    if not _TOKEN_SEGURO.match(bruto):
+        dica = " — no container, E:\\data é montado em /data" if "\\" in bruto else ""
+        raise ValueError(
+            f"valor inválido para {param.rotulo}: {bruto!r} (um único argumento: sem espaço, "
+            f"sem barra invertida, sem '-' no início){dica}")
+    if param.tipo == "grupo" or ("=" in bruto and "/" in bruto):
+        nome, _, caminho = bruto.partition("=")  # convenção Nome=/caminho/lista.txt
+        if not nome or not caminho:
+            raise ValueError(f"{param.rotulo} deve ser Nome=/caminho/arquivo: {bruto!r}")
+        _validar_caminho(caminho, param.rotulo)
+    elif param.tipo in ("caminho", "dir") or "/" in bruto:
+        _validar_caminho(bruto, param.rotulo)
+    return bruto
 
 
 def montar_cmd(spec: ScriptSpec, valores: Optional[dict[str, str]] = None) -> str:
@@ -69,12 +127,16 @@ def montar_cmd(spec: ScriptSpec, valores: Optional[dict[str, str]] = None) -> st
     valores = valores or {}
     for param in spec.params:
         bruto = (valores.get(param.name) or param.default).strip()
-        if not bruto:
-            raise ValueError(f"parâmetro obrigatório vazio: {param.rotulo} ({param.name})")
-        if ".." in bruto or not _PARAM_SEGURO.match(bruto):
-            raise ValueError(f"valor inválido para {param.rotulo}: {bruto!r}")
-        contexto[param.name] = bruto
-    return spec.cmd.format(**contexto)
+        contexto[param.name] = _validar_valor(param, bruto)
+    cmd = spec.cmd.format(**contexto)
+    # Invariante estrutural, a 2ª trava: nenhum VALOR pode mudar quantos argumentos o
+    # comando tem. Compara o cmd com os valores reais contra o mesmo cmd com cada
+    # placeholder trocado por um token neutro.
+    neutro = {k: "X" for k in contexto}
+    com_valores = spec.cmd.format(**{**neutro, **{k: v for k, v in contexto.items() if k != "dados"}})
+    if len(shlex.split(com_valores)) != len(shlex.split(spec.cmd.format(**neutro))):
+        raise ValueError("um parâmetro alteraria a estrutura do comando (nº de argumentos)")
+    return cmd
 
 
 def lancar_script(mod_id: str, script_key: str,
