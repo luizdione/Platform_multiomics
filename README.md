@@ -105,11 +105,11 @@ modules/<id>/manifest.yaml: skills_dominios ──► "skills relacionadas" no m
 |---|---|---|
 | 0 | Congelar plataformas antigas (tag `archive/2026-09-final`) | ✅ 2026-09-02 |
 | 1 | Esqueleto: casca web, fila, guarda de RAM, doctor, CI | ✅ 0.1.0 |
-| 2 | Genômica: extração/SnpEff/frequências (0.2.0) + painéis via GTF local, integridade, **Fst Angus×Nelore plink2** (0.3.0) + **VEP** cache pinado 110 (0.4.0) | ✅ 0.4.0 |
+| 2 | Genômica: extração/SnpEff/frequências (0.2.0) + painéis via GTF local, integridade, **Fst Angus×Brahman plink2** (0.3.0; era Angus×Nelore até a correção dos rótulos de raça em 2026-10-19) + **VEP** cache pinado 110 (0.4.0) | ✅ 0.4.0 |
 | — | Workflows encadeados (selo "testado") + 🎓 **Professor Ômico** (Ollama/LILO) | ✅ 0.3.0 |
 | 3 | Epigenômica: **painel 108 versionado canônico**, DMCs methylKit, interseção, metaperfil TSS (HOMER/MOFA2 `planejado` c/ motivo) | ✅ núcleo 0.4.0 |
 | 4 | Transcriptômica: SRA (demo real 25k spots), FastQC/MultiQC, Salmon (índice bovino em refs, biocontainer 1.10.3) e **DESeq2 granulosa 4×4 real** (nf-core DinD `planejado` c/ motivo: acervo legado de 34 amostras reaproveitado) | ✅ 0.5.0 |
-| 5 | ML (nested CV+SHAP+painel mínimo, **bal.acc 0,948** Angus×Nelore real — XGBoost com o painel COMPLETO de 311 variantes; o painel mínimo de 50 dá 0,939), **/skills** (815 offline), doctor v2 + /diagnostico, glossário fundido (40 termos), **modo aula** executável, gate de publicação | ✅ 0.6.0 |
+| 5 | ML (nested CV+SHAP+painel mínimo, **bal.acc 1,000** Angus×Brahman real — XGBoost com o painel COMPLETO de 515 variantes, RF 0,991; o painel mínimo de 50 dá o mesmo; contraste taurino×indicino, quase perfeito por natureza; o 0,948 de Angus×Nelore das versões anteriores vinha de rótulos de raça inválidos, corrigidos em 2026-10-19), **/skills** (815 offline), doctor v2 + /diagnostico, glossário fundido (40 termos), **modo aula** executável, gate de publicação | ✅ 0.6.0 |
 | — | Backlog do plano: HOMER (motifs), MOFA2 (promotor × corpo), robustez ML A1/A2/A3 | ✅ 0.7.0 |
 | — | **Auditoria adversarial** (12 dimensões, 95 achados) → correções científicas, selo com lastro, gate de credenciais | ✅ 0.8.0 |
 | — | **Ponte com o plugin Bioinfo**: busca PT/EN em /skills (servidor), guias de domínio, elo módulo→domínio no manifest, Professor aponta a biblioteca quando o catálogo não cobre | ✅ 1.0.0 |

@@ -36,12 +36,14 @@ def test_smoke_dataset_genotipos(tmp_path):
             "--vcf", "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf",
             "--regiao", "14:400000-900000",
             "--grupo-a", "Angus=/data/1000bg_metadata/samples_angus.txt",
-            "--grupo-b", "Nelore=/data/1000bg_metadata/samples_nelore.txt",
+            "--grupo-b", "Brahman=/data/1000bg_metadata/samples_brahman.txt",
             "--maf", "0.2", "--passo", "20", "--saida", str(tmp_path))
     assert r.returncode == 0, f"dataset falhou:\n{r.stdout}\n{r.stderr[-1200:]}"
     resumo = json.loads((tmp_path / "dataset_resumo.json").read_text(encoding="utf-8"))
-    assert resumo["grupo_a"]["n"] >= 100 and resumo["grupo_b"]["n"] >= 300
-    assert resumo["n_variantes_matriz"] > 50
+    # listas vigentes (2026-10-19): 102 Angus e 55 Brahman, ambos no BCF Run 8
+    assert resumo["grupo_a"]["n"] >= 100 and resumo["grupo_b"]["n"] >= 50
+    # 157 amostras (e não as 497 do par antigo) dão menos variantes com MAF ≥ 0,2: 40 nesta janela
+    assert resumo["n_variantes_matriz"] > 20
 
 
 @pytest.mark.smoke
@@ -66,7 +68,7 @@ def test_smoke_classificar_sintetico(tmp_path):
     with rotulos.open("w", encoding="utf-8") as f:
         f.write("amostra\tgrupo\n")
         for s in amostras:
-            f.write(f"{s}\t{'Angus' if s.startswith('A') else 'Nelore'}\n")
+            f.write(f"{s}\t{'Angus' if s.startswith('A') else 'Brahman'}\n")
 
     r = _py("ml_classificar.py", "--matriz", str(matriz), "--rotulos", str(rotulos),
             "--k-painel", "10", "--saida", str(tmp_path / "out"))

@@ -2,6 +2,42 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [Unreleased] · Correção dos rótulos de raça nas demos de Fst e ML (2026-10-19)
+
+As listas de raça do 1000 Bull Genomes (`E:\data\1000bg_metadata\samples_*.txt`) estavam com os
+rótulos trocados em relação ao campo Breed do BioSample; o autor mandou corrigir na fonte para o erro
+não se espalhar (ver `LEIA-ME_ROTULOS.md` e `validar_rotulos.py` nessa pasta). O par "Angus × Nelore"
+(112 × 385) das demos **não era um contraste de raças**. As entradas antigas deste CHANGELOG (0.3.0,
+0.6.0, 0.8.0) descrevem o que foi entregue na época e ficam como histórico; os números delas (Fst 0,283;
+bal.acc 0,948; 311 SNPs) **não valem**.
+
+### Corrigido
+- **Fst por raça** (`genomica/fst_racas`) e **dataset, classificação e robustez do ML**: os defaults
+  passam ao par válido **Angus (102) × Brahman (55)** (`samples_angus.txt`, `samples_brahman.txt`; 157
+  amostras, todas presentes no BCF Run 8). Títulos, descrições, nomes de resultado ("Fst
+  Angus×Brahman"), docstrings, glossário e README acompanham.
+- **Re-execução pela própria plataforma**, nos caminhos padrão (jobs
+  `genomica-fst_racas-20261019-040231-d325f5` e `ml-ml_robustez_demo-20261019-040957-b4ecfc`,
+  workflow `wf-ml-wf_ml_aims-20261019-040805-460bea`):
+
+  | | antes (rótulos inválidos) | agora (Angus 102 × Brahman 55) |
+  |---|---|---|
+  | Fst global (Hudson, BTA14:1–2,5 Mb) | 0,283 | 0,389 |
+  | variantes na matriz do ML | 311 (de 4.662) | 515 (de 7.718) |
+  | bal.acc. RF / XGBoost, painel completo | 0,936 / 0,948 | 0,991 / 1,000 |
+  | núcleo estável do painel (≥ 80 %) | n/d | 50 de 50 (recorrência 5/5) |
+
+  A acurácia ≈ 1,0 é esperada: taurino × indicino são subespécies. O painel mínimo continua sendo
+  escolhido dentro de cada fold, então não é vazamento.
+- **Selo `ml/wf_ml_aims`** recarimbado DEPOIS da re-execução (`testado_em` 2026-10-19, `hash_scripts`
+  `9563a9c0e7dbc8de`); os outros quatro selos seguem válidos (`python -m omica selos`).
+- Resultados antigos **arquivados sem alteração** em
+  `E:\data\omica\results\_ARQUIVO_INVALIDOS_rotulos_2026-10-19` (md5 e LEIA-ME). Os jobs antigos
+  continuam no histórico, cada um com a nota `INVALIDO_rotulos_2026-10-19.txt` ao lado (o
+  `status.json` e o `job.log` não foram editados).
+- Testes: o smoke do Fst e o do dataset ML passam a usar Brahman; os comentários dos testes de
+  NaN/cobertura (linhas do contraste antigo) dizem que a lógica independe do par de raças.
+
 ## [1.0.0] — 2026-10-06 · Ponte com o plugin Bioinfo: a biblioteca de skills passa a responder em português
 
 Numerada 1.0 pelo autor na publicação (era 0.9.0 nos commits `b9d3493`…`833b47f`):

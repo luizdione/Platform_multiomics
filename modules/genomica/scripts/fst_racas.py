@@ -6,12 +6,18 @@ E:\\data\\1000bg_metadata (mesmos IDs SAMEA*/SAMN* do header dos BCFs Run 8) —
 o script primeiro INTERSECTA as listas com as amostras presentes no arquivo e
 reporta quantas entram de cada lado.
 
+Rótulos de raça (corrigidos em 2026-10-19): as listas vigentes vêm do campo Breed
+do BioSample e são conferidas por E:\\data\\1000bg_metadata\\validar_rotulos.py
+(ver LEIA-ME_ROTULOS.md). As listas antigas samples_nelore/samples_angus (112 ×
+385) tinham os rótulos trocados e foram arquivadas; o par válido da demo é
+Angus (102) × Brahman (55).
+
 Uso:
   python3 modules/genomica/scripts/fst_racas.py \
       --vcf /data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf \
       --regiao 14:1-2500000 \
       --grupo-a Angus=/data/1000bg_metadata/samples_angus.txt \
-      --grupo-b Nelore=/data/1000bg_metadata/samples_nelore.txt \
+      --grupo-b Brahman=/data/1000bg_metadata/samples_brahman.txt \
       --saida <dir>
 """
 from __future__ import annotations
@@ -41,9 +47,11 @@ def top_por_fst(colunas: list[str], corpo: list[str], top: int, min_obs: int = 1
     ARMADILHA que este código existe para evitar: float("nan") NÃO levanta
     ValueError — Python aceita a string "nan". A versão anterior ordenava com
     chaves NaN, e como toda comparação com NaN é falsa a ordem saiu incoerente:
-    no contraste Angus×Nelore real, 4 das 5 primeiras linhas do "top 20" eram
-    variantes com OBS_CT=0 (nenhum genótipo observado) e Fst NaN, com o maior
-    Fst verdadeiro (0,53) aparecendo só na 5ª linha.
+    no primeiro contraste real (o então Angus×Nelore, 497 amostras; as listas de
+    raça dele foram invalidadas em 2026-10-19, mas o defeito não depende do par de
+    raças), 4 das 5 primeiras linhas do "top 20" eram variantes com OBS_CT=0
+    (nenhum genótipo observado) e Fst NaN, com o maior Fst verdadeiro (0,53)
+    aparecendo só na 5ª linha.
 
     Descartar só OBS_CT==0 NÃO basta (revisão de 2026-09-14): no mesmo arquivo,
     uma variante com 4 genótipos observados de 497 tem Fst=1,0 e passaria a

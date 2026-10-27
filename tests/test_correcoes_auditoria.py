@@ -48,8 +48,9 @@ SEM_NUMPY = "perfil_tss.py precisa de numpy (imagem methyl); a imagem web não o
 
 
 # ---------------------------------------------------------------- Fst e NaN
-# Linhas REAIS do contraste Angus×Nelore (E:\data\omica\results\genomica\fst),
-# na ordem em que o código antigo as escreveu no "top 20".
+# Linhas REAIS do primeiro contraste (o então Angus×Nelore; as listas de raça dele
+# foram invalidadas em 2026-10-19 — o tratamento de NaN/cobertura testado aqui não
+# depende do par de raças), na ordem em que o código antigo as escreveu no "top 20".
 CABECALHO_FST = ["#CHROM", "POS", "ID", "OBS_CT", "HUDSON_FST"]
 CORPO_FST = [
     "14\t3893\t.\t0\tnan",        # sem nenhum genótipo observado
@@ -93,7 +94,7 @@ LINHA_COBERTURA_INFIMA = "14\t123085\t.\t4\t1"
 def test_top_fst_barra_cobertura_infima_com_fst_maximo():
     fst = _carregar_script("modules/genomica/scripts/fst_racas.py")
     corpo = CORPO_FST + [LINHA_COBERTURA_INFIMA]
-    min_obs = 249  # metade da coorte real (112 Angus + 385 Nelore)
+    min_obs = 249  # metade da coorte do contraste de origem das linhas (497 amostras)
 
     top, comparaveis, n_nan, n_sem_obs, n_baixa = fst.top_por_fst(
         CABECALHO_FST, corpo, 20, min_obs)

@@ -102,7 +102,7 @@ def test_smoke_fst_racas(tmp_path):
            "--vcf", "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf",
            "--regiao", "14:400000-700000",
            "--grupo-a", "Angus=/data/1000bg_metadata/samples_angus.txt",
-           "--grupo-b", "Nelore=/data/1000bg_metadata/samples_nelore.txt",
+           "--grupo-b", "Brahman=/data/1000bg_metadata/samples_brahman.txt",
            "--saida", str(tmp_path))
     resumo = json.loads((tmp_path / "fst_resumo.json").read_text(encoding="utf-8"))
     assert resumo["grupo_a"]["n_amostras"] >= 2 and resumo["grupo_b"]["n_amostras"] >= 2

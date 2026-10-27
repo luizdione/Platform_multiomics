@@ -1,7 +1,9 @@
 # Módulo ML — manifest (Fase 5, migração curada do bovine_aim_gwas_ml_thermalcore).
 # Agnóstico ao marcador: a mesma engrenagem classifica SNPs (0/1/2), CpGs ou
-# genes — basta trocar a matriz. Demo REAL: genótipos Angus×Nelore do BCF Run 8
+# genes — basta trocar a matriz. Demo REAL: genótipos Angus×Brahman do BCF Run 8
 # (fila bioinfo monta o dataset; fila ml classifica — cadeia entre filas).
+# Rótulos de raça corrigidos em 2026-10-19: o par Angus×Nelore (112×385) das versões
+# anteriores usava listas inválidas; ver E:\data\1000bg_metadata\LEIA-ME_ROTULOS.md.
 id: ml
 nome_pt: Aprendizado de máquina
 nome_en: Machine learning
@@ -25,7 +27,7 @@ fases:
     descricao: Matriz de marcadores × amostras com rótulos de grupo.
     etapas:
       - key: dataset_genotipos
-        desc: Genótipos 0/1/2 do BCF real (MAF mínimo + afinamento) p/ Angus×Nelore
+        desc: Genótipos 0/1/2 do BCF real (MAF mínimo + afinamento) p/ Angus×Brahman
         auto: true
         status_type: concluido
   - id: ml_fase2
@@ -46,10 +48,10 @@ fases:
         status_type: concluido
 scripts:
   - key: ml_dataset_demo
-    titulo: "Dataset: genótipos Angus × Nelore (BTA14 demo)"
+    titulo: "Dataset: genótipos Angus × Brahman (BTA14 demo)"
     descricao: >-
-      Extrai genótipos 0/1/2 das 497 amostras reais na região demo, com MAF
-      mínimo e afinamento — a matriz de entrada do classificador.
+      Extrai genótipos 0/1/2 das amostras reais (Angus × Brahman) na região demo,
+      com MAF mínimo e afinamento — a matriz de entrada do classificador.
     runtime: "image:omica-bioinfo"
     cmd: >-
       python3 modules/ml/scripts/ml_dataset_genotipos.py
@@ -61,7 +63,7 @@ scripts:
       - {name: vcf, rotulo: "VCF/BCF com genótipos", default: "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf"}
       - {name: regiao, rotulo: "Região", default: "14:1-2500000"}
       - {name: grupo_a, rotulo: "Grupo A", default: "Angus=/data/1000bg_metadata/samples_angus.txt"}
-      - {name: grupo_b, rotulo: "Grupo B", default: "Nelore=/data/1000bg_metadata/samples_nelore.txt"}
+      - {name: grupo_b, rotulo: "Grupo B", default: "Brahman=/data/1000bg_metadata/samples_brahman.txt"}
       - {name: maf, rotulo: "MAF mínimo", default: "0.2"}
       - {name: passo, rotulo: "Afinamento (1 a cada N)", default: "15"}
     inputs: ["E:\\data\\1000bg_vcf", "E:\\data\\1000bg_metadata"]
@@ -111,18 +113,21 @@ scripts:
     tempo_estimado: "2–5 min"
 workflows:
   - id: wf_ml_aims
-    titulo: "Do BCF ao painel mínimo de AIMs (Angus × Nelore)"
+    titulo: "Do BCF ao painel mínimo de AIMs (Angus × Brahman)"
     descricao: >-
       Extração de genótipos reais (fila bioinfo) → classificação com CV aninhada,
       SHAP e painel mínimo (fila ml) — cadeia entre filas especializadas.
     passos: [ml_dataset_demo, ml_classificar_demo]
-    testado_em: "2026-09-03"
-    testado_por: "Claude (filas bioinfo→ml encadeadas; 497 amostras reais, bal.acc 0,948)"
-    hash_scripts: "b3c5336d1e0eb1fb"
+    testado_em: "2026-10-19"
+    testado_por: "Claude (re-execução pós-correção dos rótulos de raça; filas bioinfo→ml encadeadas; 157 amostras reais, 102 Angus × 55 Brahman, bal.acc 0,991 RF e 1,000 XGBoost no painel completo de 515 variantes)"
+    hash_scripts: "9563a9c0e7dbc8de"
     nota_didatica: >-
       O mesmo desenho do paper de AIMs do autor: o painel mínimo é escolhido
       dentro de cada fold de treino, nunca olhando o conjunto todo — é assim que
-      se evita o vazamento que infla acurácias.
+      se evita o vazamento que infla acurácias. Taurino × indicino são
+      subespécies: a separação é quase perfeita (bal.acc ≈ 1,0) por natureza do
+      contraste, não por vazamento; entre raças da mesma subespécie o problema é
+      bem mais difícil.
 results_spec:
   "Dataset (resumo)": "ml/demo/dataset/dataset_resumo.json"
   "Classificação (resumo)": "ml/demo/classificacao/ml_resumo.json"

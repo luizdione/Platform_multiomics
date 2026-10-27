@@ -6,11 +6,16 @@ grupos (listas de BioSamples) numa região, filtrando por MAF e AFINANDO a grade
 fila "bioinfo" (bcftools no PATH); o passo seguinte (classificação) consome a
 matriz na fila "ml".
 
+Rótulos de raça (corrigidos em 2026-10-19): usar as listas de
+E:\\data\\1000bg_metadata (campo Breed do BioSample, conferidas por
+validar_rotulos.py). O par antigo Angus×Nelore (112 × 385) tinha rótulos
+inválidos; o par válido da demo é Angus (102) × Brahman (55).
+
 Uso:
   python3 modules/ml/scripts/ml_dataset_genotipos.py \
       --vcf /data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf --regiao 14:1-2500000 \
       --grupo-a Angus=/data/1000bg_metadata/samples_angus.txt \
-      --grupo-b Nelore=/data/1000bg_metadata/samples_nelore.txt \
+      --grupo-b Brahman=/data/1000bg_metadata/samples_brahman.txt \
       --maf 0.2 --passo 15 --saida <dir>
 """
 from __future__ import annotations

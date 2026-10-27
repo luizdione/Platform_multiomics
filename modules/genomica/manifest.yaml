@@ -49,7 +49,7 @@ fases:
         auto: true
         status_type: concluido
       - key: fst_racas
-        desc: Fst Hudson entre raças (plink2) com as listas reais de BioSamples (Angus×Nelore)
+        desc: Fst Hudson entre raças (plink2) com as listas reais de BioSamples (Angus×Brahman)
         auto: true
         status_type: concluido
       - key: vep
@@ -133,10 +133,12 @@ scripts:
     cpus: 1
     tempo_estimado: "~1 min"
   - key: fst_racas
-    titulo: "Fst por raça (Angus × Nelore, plink2)"
+    titulo: "Fst por raça (Angus × Brahman, plink2)"
     descricao: >-
       Fst de Hudson por variante e global entre duas raças, com as listas reais de
-      BioSamples do 1000BG (interseção reportada no log).
+      BioSamples do 1000BG (interseção reportada no log). Raça = campo Breed do
+      BioSample, conferido por E:\data\1000bg_metadata\validar_rotulos.py (o par
+      Angus×Nelore das versões anteriores usava rótulos inválidos: ver LEIA-ME_ROTULOS.md).
     runtime: "image:omica-bioinfo"
     cmd: >-
       python3 modules/genomica/scripts/fst_racas.py
@@ -147,8 +149,8 @@ scripts:
       - {name: vcf, rotulo: "VCF/BCF com genótipos", default: "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf"}
       - {name: regiao, rotulo: "Região (crom:ini-fim)", default: "14:1-2500000"}
       - {name: grupo_a, rotulo: "Grupo A (Nome=lista)", default: "Angus=/data/1000bg_metadata/samples_angus.txt"}
-      - {name: grupo_b, rotulo: "Grupo B (Nome=lista)", default: "Nelore=/data/1000bg_metadata/samples_nelore.txt"}
-    inputs: ["E:\\data\\1000bg_vcf", "E:\\data\\1000bg_metadata\\samples_angus.txt", "E:\\data\\1000bg_metadata\\samples_nelore.txt"]
+      - {name: grupo_b, rotulo: "Grupo B (Nome=lista)", default: "Brahman=/data/1000bg_metadata/samples_brahman.txt"}
+    inputs: ["E:\\data\\1000bg_vcf", "E:\\data\\1000bg_metadata\\samples_angus.txt", "E:\\data\\1000bg_metadata\\samples_brahman.txt"]
     outputs: ["results/genomica/fst/fst_top.tsv", "results/genomica/fst/fst_resumo.json"]
     mem_gb: 4
     cpus: 2
@@ -190,7 +192,7 @@ results_spec:
   "Painel termotolerância (resumo)": "genomica/paineis/termotolerancia_resumo.json"
   "Integridade 1000BG (resumo)": "genomica/integridade/integridade_resumo.json"
   "Integridade 1000BG (tabela)": "genomica/integridade/integridade.tsv"
-  "Fst Angus×Nelore (resumo)": "genomica/fst/fst_resumo.json"
-  "Fst Angus×Nelore (top)": "genomica/fst/fst_top.tsv"
+  "Fst Angus×Brahman (resumo)": "genomica/fst/fst_resumo.json"
+  "Fst Angus×Brahman (top)": "genomica/fst/fst_top.tsv"
   "VEP (resumo)": "genomica/demo/vep/vep_resumo.json"
   "VEP (consequências)": "genomica/demo/vep/efeitos_vep.tsv"
