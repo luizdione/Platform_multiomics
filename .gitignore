@@ -10,6 +10,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
+# exceção: os workflows gerados do n8n são versionados (o teste test_n8n_builder confere que
+# n8n/dist está em dia com o builder; o n8n importa daqui)
+!n8n/dist/
 build/
 .eggs/
 .venv/
