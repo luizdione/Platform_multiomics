@@ -39,6 +39,10 @@ _DEFAULTS = {
     # local passa por ele. No container chega montado SOMENTE LEITURA em /gpu_switch.
     "OMICA_GPU_SWITCH": "/gpu_switch/switch.json" if os.environ.get("OMICA_IN_DOCKER")
                         else str(Path.home() / ".ollama_delegate" / "switch.json"),
+    # Raízes de REFERÊNCIA (G1 §1.3): pastas de dados pesados, relativas a GENOME_DATA, que um
+    # run lê SEM copiar. Lista separada por vírgula; "-" desliga todas. Cada raiz precisa de um
+    # bind SOMENTE LEITURA equivalente no docker-compose.yml (hoje: 1000bg_vcf).
+    "OMICA_RAIZES_REFERENCIA": "1000bg_vcf",
 }
 
 
@@ -74,11 +78,10 @@ class Config:
     ollama_url: str         # motor do Professor Ômico (Ollama local, mesmo do LILO)
     ollama_model: str
     plugin_dir: Path | None  # plugin Bioinfo no host; None onde ele não existe (container, CI)
-    # repr=False: o pytest imprime `cfg = Config(...)` quando um teste falha — o token
-    # iria parar no log.
-    api_token: str = field(default="", repr=False)
     gpu_switch: Path = field(default_factory=lambda: Path(_DEFAULTS["OMICA_GPU_SWITCH"]))
     in_docker: bool = field(default_factory=lambda: bool(os.environ.get("OMICA_IN_DOCKER")))
+    # no FIM e com default: quem monta Config à mão (testes) não precisa conhecer o campo
+    raizes_referencia: tuple[str, ...] = field(default=("1000bg_vcf",))
 
     @property
     def raw_dir(self) -> Path:
@@ -120,11 +123,46 @@ def get_config() -> Config:
         ollama_url=_obter("OMICA_OLLAMA_URL", dotenv),
         ollama_model=_obter("OMICA_OLLAMA_MODEL", dotenv),
         plugin_dir=Path(plugin) if (plugin := _obter("BIOINFO_PLUGIN_DIR", dotenv)) else None,
-        api_token=_obter("OMICA_API_TOKEN", dotenv),
         gpu_switch=Path(_obter("OMICA_GPU_SWITCH", dotenv)),
+        raizes_referencia=_lista_raizes(_obter("OMICA_RAIZES_REFERENCIA", dotenv)),
     )
+
+
+def _lista_raizes(valor: str) -> tuple[str, ...]:
+    """"a,b" → ("a", "b"); "-" → () (desliga as referências: o `_obter` trata vazio como
+    ausente e cairia no default, por isso o desligamento precisa de um sentinela)."""
+    if valor.strip() == "-":
+        return ()
+    return tuple(n.strip() for n in valor.split(",") if n.strip())
+
+
+_token_cache: tuple[int, str] | None = None
+
+
+def token_api() -> str:
+    """Token da API v1 — FORA do lru_cache do get_config de propósito (OP-2, revisão F1).
+
+    Se o token vazasse, trocar o .env não o revogava: o processo guardava a config na
+    partida e o token vazado seguia aceito até um restart que ninguém lembrava de fazer.
+    Aqui o .env é relido sempre que o mtime dele muda: trocar o valor revoga na hora.
+    Precedência igual à do resto da config: ambiente > .env > vazio (= API desligada).
+    """
+    global _token_cache
+    valor_env = os.environ.get("OMICA_API_TOKEN")
+    if valor_env:
+        return valor_env
+    arquivo = REPO_ROOT / ".env"
+    try:
+        mtime = arquivo.stat().st_mtime_ns
+    except OSError:
+        return ""
+    if _token_cache is None or _token_cache[0] != mtime:
+        _token_cache = (mtime, _ler_dotenv(arquivo).get("OMICA_API_TOKEN", ""))
+    return _token_cache[1]
 
 
 def reset_config_cache() -> None:
     """Para testes: força reler o ambiente na próxima chamada de get_config()."""
+    global _token_cache
     get_config.cache_clear()
+    _token_cache = None

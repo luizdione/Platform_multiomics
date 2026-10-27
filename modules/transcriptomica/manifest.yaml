@@ -63,8 +63,8 @@ scripts:
       --referencia winter_control --padj 0.05 --lfc 1
       --saida {dados}/results/transcriptomica/demo/de
     params:
-      - {name: counts, rotulo: "Matriz de contagens (genes × amostras)", default: "modules/transcriptomica/demo_data/counts_granulosa.tsv"}
-      - {name: coldata, rotulo: "Tabela de amostras (amostra, condicao)", default: "modules/transcriptomica/demo_data/coldata_granulosa.tsv"}
+      - {name: counts, rotulo: "Matriz de contagens (genes × amostras)", default: "modules/transcriptomica/demo_data/counts_granulosa.tsv", tipo: caminho}
+      - {name: coldata, rotulo: "Tabela de amostras (amostra, condicao)", default: "modules/transcriptomica/demo_data/coldata_granulosa.tsv", tipo: caminho}
     inputs: ["modules/transcriptomica/demo_data/counts_granulosa.tsv", "modules/transcriptomica/demo_data/coldata_granulosa.tsv"]
     outputs: ["results/transcriptomica/demo/de/de_table.tsv", "results/transcriptomica/demo/de/de_resumo.json"]
     mem_gb: 3
@@ -92,7 +92,7 @@ scripts:
       python3 modules/transcriptomica/scripts/qc_fastq.py
       --dir {dir_fastq} --saida {dados}/results/transcriptomica/demo/qc
     params:
-      - {name: dir_fastq, rotulo: "Diretório com *.fastq.gz", default: "modules/transcriptomica/demo_data"}
+      - {name: dir_fastq, rotulo: "Diretório com *.fastq.gz", default: "modules/transcriptomica/demo_data", tipo: dir}
     inputs: ["modules/transcriptomica/demo_data"]
     outputs: ["results/transcriptomica/demo/qc/multiqc_report.html", "results/transcriptomica/demo/qc/qc_resumo.json"]
     mem_gb: 2
@@ -107,8 +107,8 @@ scripts:
       --srr {srr} --spots {spots}
       --saida {dados}/raw/sra/{srr}
     params:
-      - {name: srr, rotulo: "Acesso SRR", default: "SRR24953465"}
-      - {name: spots, rotulo: "Spots (0 = tudo)", default: "25000"}
+      - {name: srr, rotulo: "Acesso SRR", default: "SRR24953465", tipo: texto}
+      - {name: spots, rotulo: "Spots (0 = tudo)", default: "25000", tipo: inteiro}
     inputs: []
     outputs: []
     mem_gb: 2
@@ -126,13 +126,65 @@ scripts:
       --indice /data/omica/refs/salmon_bostau --construir-indice
       --saida {dados}/results/transcriptomica/demo/quant
     params:
-      - {name: fastq1, rotulo: "FASTQ R1", default: "modules/transcriptomica/demo_data/SRR24953465_1.fastq.gz"}
-      - {name: fastq2, rotulo: "FASTQ R2 (vazio = single-end)", default: "modules/transcriptomica/demo_data/SRR24953465_2.fastq.gz"}
+      - {name: fastq1, rotulo: "FASTQ R1", default: "modules/transcriptomica/demo_data/SRR24953465_1.fastq.gz", tipo: caminho}
+      - {name: fastq2, rotulo: "FASTQ R2 (vazio = single-end)", default: "modules/transcriptomica/demo_data/SRR24953465_2.fastq.gz", tipo: caminho}
     inputs: ["modules/transcriptomica/demo_data", "E:\\data\\rnaseq\\nfcore_output\\sub03\\genome\\genome.transcripts.fa"]
     outputs: ["results/transcriptomica/demo/quant/quant.sf", "results/transcriptomica/demo/quant/quant_resumo.json"]
     mem_gb: 6
     cpus: 2
     tempo_estimado: "índice 1ª vez ~10 min; quant ~1 min"
+# Entradas ORQUESTRÁVEIS (n8n, pipelines/*.yaml): os MESMOS arquivos de script de cima,
+# com entrada e saída como parâmetro. `{saida}` é a pasta do run, injetada pelo servidor —
+# o demo selado nunca é sobrescrito. `consome`/`produz` são o contrato tipado que
+# omica/pipelines.py confere no load (formatos em omica/contrato/formatos.py).
+# Seção separada: UI, Professor, plugin Bioinfo e o hash dos selos não a enxergam.
+scripts_api:
+  - key: deseq2
+    titulo: "Expressão diferencial (DESeq2)"
+    descricao: Contraste entre duas condições de uma matriz de contagens genes × amostras.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      Rscript modules/transcriptomica/scripts/expressao_deseq2.R
+      --counts {counts} --coldata {coldata}
+      --referencia {referencia} --padj {padj} --lfc {lfc}
+      --saida {saida}
+    params:
+      - {name: counts, rotulo: "Matriz de contagens (genes × amostras)", tipo: caminho}
+      - {name: coldata, rotulo: "Tabela de amostras (amostra, condicao)", tipo: caminho}
+      - {name: referencia, rotulo: "Condição de referência (controle)", tipo: texto}
+      - {name: padj, rotulo: "Corte de padj", default: "0.05", tipo: decimal}
+      - {name: lfc, rotulo: "Corte de |log2FC|", default: "1", tipo: decimal}
+    consome: {counts: contagens_genes, coldata: coldata}
+    produz:
+      de_table: {arquivo: de_table.tsv, formato: tabela_de}
+      de_resumo: {arquivo: de_resumo.json, formato: resumo_json}
+    mem_gb: 3
+    cpus: 1
+    tempo_estimado: "~1 min"
+  # volcano_api.py, não o volcano_plot.py do workflow selado: aquele tem os rótulos FIXOS do
+  # demo ("summer_heat vs winter_control", "granulosa Angus") e, com a referência escolhida
+  # pelo autor, anunciava o contraste invertido. Este lê o contraste que o DESeq2 de fato
+  # calculou no de_resumo.json (revisão F2, achado #17).
+  - key: volcano
+    titulo: "Volcano plot (DESeq2)"
+    descricao: Volcano da tabela DE, rotulado com o contraste que o DESeq2 calculou, com destaques dos genes mais significativos.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/transcriptomica/scripts/volcano_api.py
+      --de {de} --resumo {resumo} --padj {padj} --lfc {lfc}
+      --saida {saida}
+    params:
+      - {name: de, rotulo: "Tabela DE (saída do DESeq2)", tipo: caminho}
+      - {name: resumo, rotulo: "Resumo do DESeq2 (traz o contraste calculado)", tipo: caminho}
+      - {name: padj, rotulo: "Corte de padj", default: "0.05", tipo: decimal}
+      - {name: lfc, rotulo: "Corte de |log2FC|", default: "1", tipo: decimal}
+    consome: {de: tabela_de, resumo: resumo_json}
+    produz:
+      volcano_png: {arquivo: volcano.png, formato: figura_png}
+      volcano_resumo: {arquivo: volcano_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~15 s"
 workflows:
   - id: wf_de_granulosa
     titulo: "Do estresse térmico ao volcano (granulosa 4×4)"

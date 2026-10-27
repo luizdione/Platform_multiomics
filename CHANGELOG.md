@@ -2,6 +2,192 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERSION`.
 
+## [Unreleased] · Integração com o n8n (fases F0–F2 do plano de 2026-10-18)
+
+### ⚠️ Mudanças de comportamento — leia antes do `docker compose up`
+- **O `omica-web` passa a escutar só em `127.0.0.1:8710`** (antes `0.0.0.0`: UI sem
+  autenticação exposta na rede local). Para aula pela rede, ponha `OMICA_BIND=0.0.0.0` no
+  `.env` — conscientemente: as páginas HTML continuam sem autenticação. Um `.env` antigo
+  sem a linha `OMICA_BIND` herda o novo padrão.
+- **Requisito novo: a rede Docker externa `omica_api`.** Sem ela, `docker compose up` e o
+  `abrir_omica.bat` abortam com "network omica_api declared as external, but could not be
+  found". Crie uma vez com `powershell -File C:\github\n8n-infra\scripts\garantir_rede.ps1`.
+  A rede é `--internal` e liga só o `omica-web` ao n8n — o Redis (sem senha) e os workers
+  ficam fora do alcance do n8n.
+- **Parâmetros mais estritos.** Cada valor vira um único argumento: sem espaço, sem barra
+  invertida, sem `-` no início, sem `..` e sem URL (`://`); caminhos só em
+  `modules/<m>/demo_data|data`, `/data` ou na pasta de dados da plataforma. Caminho do
+  Windows (`E:\data\...`) é recusado com a dica do equivalente no container (`/data/...`).
+
+### Adicionado
+- **API JSON `/api/v1`** para orquestradores (n8n): `GET /saude`, `GET /catalogo`
+  (params com default e tipo, fila, RAM, selos), `GET /jobs/{id}` (status, cauda do log,
+  artefatos com bytes/sha256). Autenticação `Authorization: Bearer <OMICA_API_TOKEN>`; sem
+  token configurado tudo responde **503** (falha fechada). O token fica só no `.env`
+  (gitignored), nunca no `environment:` do compose (apareceria no `docker inspect`), e é
+  relido quando o `.env` muda — trocar o valor revoga um token vazado sem reiniciar nada.
+- `ParamSpec.tipo` (`texto|caminho|dir|inteiro|decimal|grupo`), declarado nos 31 parâmetros
+  dos 4 manifests. Não entra no hash dos selos (os 5 continuam válidos).
+- Mount somente leitura do interruptor da GPU do autor em `/gpu_switch`
+  (`OLLAMA_DELEGATE_DIR`); `GET /api/v1/saude` informa se a GPU está liberada. Interruptor
+  ausente = GPU **não** liberada.
+- Repositório irmão `C:\github\n8n-infra`: o n8n compartilhado (scijournal + ômica) fixado
+  em 2.34.5, em `127.0.0.1:5678`, com backup e teste de restauração validados.
+
+### Corrigido (revisão adversarial da F1, 2026-10-19)
+- **Injeção de argumentos e SSRF pelo sanitizador.** O padrão antigo aceitava espaço
+  (`x --outra-flag`) e `-` inicial (`--help`). A 1ª versão da correção ainda deixava passar
+  `'https://host/c=/data/x'` — a convenção `Nome=/caminho` validava só o lado direito do
+  `=`, e o `read.delim` do R baixava a URL — e `'Angus=.env'`, que fazia o `fst_racas.py`
+  abrir o `.env` do token. Os ramos numéricos aceitavam dígito Unicode e `-1e-5` (que o
+  argparse lê como flag).
+- `GET /api/v1/jobs/{id}` mostrava arquivos de uma rodada ANTERIOR como artefatos de um job
+  ainda em fila, rodando ou com erro. Agora, fora de `done`, as saídas vêm como `pendente`,
+  e arquivo mais antigo que o início do job vem marcado `anterior_ao_job`, sem sha256.
+
+### Adicionado — F2: contrato tipado entre passos, runs, plano aprovado e envelope
+- **Seção `scripts_api` nos manifests** (começando pela Transcriptômica: `deseq2`,
+  `volcano`): os MESMOS arquivos de script, com entrada e `--saida {saida}` como
+  parâmetro e um contrato tipado — `consome {param: formato}` e
+  `produz {porta: {arquivo, formato}}`. A UI, o Professor, o plugin Bioinfo e o hash dos
+  selos só leem `scripts:`; os 5 selos não mudam.
+- **Validadores de formato** (`omica/contrato/formatos.py`, só stdlib): `contagens_genes`,
+  `coldata`, `tabela_de`, `resumo_json`, `figura_png` e a checagem cruzada
+  contagens × coldata. Formato desconhecido, arquivo ausente ou vazio nunca é "ok".
+- **Pipelines orquestráveis** (`pipelines/<id>.yaml`, modelo em `omica/pipelines.py`):
+  `liga` tipado entre passos e conferido no load — o formato que um passo produz tem de
+  ser o que o seguinte consome; escolha do autor nunca alimenta parâmetro de arquivo;
+  parâmetro que consome formato só vem por `liga`. Primeiro pipeline: `transcriptomica_de`.
+- **Runs pela API v1**: `GET /pipelines`, `POST /runs`, `PUT /runs/{id}/entradas/{nome}`
+  (arquivo cru no corpo ou `{"caminho"}`; a entrada é COPIADA para `raw/runs/<id>/`),
+  `POST /runs/{id}/plano` (escolhas só com valores reais do dado), `POST /aprovar`
+  (exige o `plano_sha256`), `POST /passos/{p}/executar` (sem parâmetros: só o plano
+  congelado; recusa se manifest, script ou entrada mudaram depois da aprovação), `GET
+  /passos/{p}/envelope` (`omica.envelope/1`: sha256, frescor e formato de cada porta) e
+  `POST /abortar`. Um run ativo por vez (`OMICA_MAX_RUNS_ATIVOS`, padrão 1).
+- `{saida}` só aceita `<dados>/results/<módulo>/runs/<run>/<passo>`: um run nunca grava
+  sobre o demo selado. E2E de 2026-10-19 sobre o demo granulosa: `de_table.tsv` idêntica
+  byte a byte à do demo e os 165 arquivos de `results/*/demo/**` intactos.
+- **Trava por run de kernel** (`omica/travas.py`: flock no container, msvcrt no host) no
+  lugar do arquivo-sentinela O_EXCL, que dependia de adivinhar quando uma trava estava
+  "velha". O limite de runs ativos passou a ser contado sob uma trava GLOBAL: com só a
+  trava de cada run, dois runs aprovados ao mesmo tempo viam zero ativos e passavam os dois
+  (canário: o teste reprova sem a trava global). Run inexistente não cria mais pasta órfã.
+
+### Adicionado — F3: agente adaptador das entradas
+- `POST /api/v1/runs/{id}/entradas/{nome}/adaptar` (só nas entradas marcadas `adaptavel`
+  no pipeline): normalização e sinônimo inequívoco primeiro; o LLM local só PROPÕE operações
+  sobre os cabeçalhos reais, pelo `motor_local` (interruptor da GPU do autor, uma inferência
+  por vez); corpo `{"ops": [...]}` = escolha do autor no formulário, com as mesmas
+  conferências. `ok=false` volta com `excecoes` e os cabeçalhos reais para os dropdowns; GPU
+  reservada ou LLM ocupado = **503** `motor_indisponivel`.
+- A inferência roda FORA da trava do run (o polling do n8n não espera minutos); a gravação
+  confere que a entrada não mudou no meio. A adaptação parte sempre do original e entra no
+  registro da entrada — modo, operações, modelo, auditoria e o sha256 do original — e,
+  portanto, no plano e no sha que o autor aprova. Executar recusa se o adaptado OU o
+  original mudarem depois da aprovação.
+
+### Adicionado — F4: relatório escrito pelo Claude, conferido aqui
+- `POST /api/v1/runs/{id}/relatorio/pedido` (ficha de fatos dos envelopes entregues,
+  invariantes conferidos, prompt versionado em `n8n/prompts/` e esquema de saída) e
+  `POST /api/v1/runs/{id}/relatorio/rascunho` (portão de números R1–R6; duas tentativas
+  automáticas, depois só a edição do autor). A chave da Anthropic fica só no n8n.
+- Página `/relatorios/{run}/` com as figuras do próprio relatório (CSP `default-src 'none'`
+  também no cabeçalho; nada fora de `figuras/*.png` é servido).
+- `GET /api/v1/runs/{id}/passos/{p}/aguardar?segundos=N` (≤120): espera longa até o job do
+  passo terminar — o laço do n8n fica só com HTTP, sem nó Wait em sub-workflow.
+
+### Adicionado — F5: workflows do n8n
+- `n8n/build_workflows.py` gera `n8n/dist/<pipeline>.json` a partir de `pipelines/<id>.yaml`
+  (formulário de arquivos → adaptação com fallback para o autor → escolhas → aprovação única →
+  passos com espera longa → relatório pelo Claude conferido aqui). Reprova o JSON com padrão
+  de segredo, aresta quebrada ou nó solto; `--checar` para o CI. Importação em `n8n/README.md`.
+- Pipeline de Transcriptômica E2E pelo formulário (2026-10-26): arquivo pronto e arquivo
+  bagunçado mapeado pelo autor (GPU reservada → "Mapear eu mesmo"); `de_table.tsv` idêntica ao
+  demo nos dois, relatório aprovado pelo portão na 1ª tentativa.
+
+### Adicionado — F5: Genômica na API de runs (pipelines `genomica_painel` e `genomica_regioes`)
+- **Entrada POR REFERÊNCIA, sem cópia**: VCF/BCF numa raiz de referência (`OMICA_RAIZES_REFERENCIA`,
+  padrão `1000bg_vcf`, relativa a `GENOME_DATA`; `-` desliga) é lido no lugar — os BCFs do Run 8
+  (0,5–1,9 GB) não cabem no teto de 256 MiB da cópia. Quem decide cópia × referência é o
+  servidor, pela raiz em que o caminho resolvido cai e pelos `modos` que a entrada aceita; o
+  cliente continua mandando só `{"caminho"}`. Nome fora dos sufixos do formato é recusado ANTES
+  de qualquer stat/sha (sem revelar hash nem tamanho de outros arquivos da raiz).
+- **Arquivos irmãos**: o índice (`.tbi`/`.csi`) é propriedade do formato e o servidor o deriva;
+  `.tbi` e `.csi` juntos reprovam (o htslib carrega o `.csi`). O worker atesta as ENTRADAS
+  (impressão no início, sha no fim) em todos os modos, e o envelope confere.
+- **Formatos novos** (só stdlib, `omica/contrato/bgzf.py` com tetos contra bomba de descompressão):
+  `painel_simbolos`, `bed_regioes` (lido como o htslib: `\r` isolado reprova; origem fora de
+  `.bed` reprova — o bcftools leria 1-based), `vcf_indexado` (contagem pelo índice ou em fluxo;
+  0 variantes reprova), `indice_vcf`, `vcf_anotado_snpeff`, `tabela_frequencias`,
+  `contagem_efeitos_snpeff`, `tabela_vep`, `contagem_consequencias_vep`.
+- Seção `scripts_api` da genômica (os mesmos scripts selados, com `--saida`) e os dois pipelines,
+  com checagens cruzadas (AF no VCF, convenção de contig, VCF × BED) e invariantes conferíveis.
+- n8n: workflows `genomica_painel`/`genomica_regioes` (entrada por caminho no formulário, pipeline
+  sem figura). **O prompt do redator mudou e vale para todos os módulos** (regras de versão,
+  montagem, BTA14, UTR); cada tentativa e o relatório gravam o `prompt_sha256` usado.
+- **E2E pelo formulário do n8n (2026-10-27)**: `genomica_painel` com o painel de termotolerância
+  (13 genes, 2.365 variantes; 2.287 com AF + 78 sem; 166 acima do corte de MAF; relatório com 68
+  números rastreados) e `genomica_regioes` com o BED do demo selado — `frequencias.tsv`,
+  `efeitos.tsv` e `efeitos_vep.tsv` **idênticas byte a byte** às publicadas. O prompt ganhou o
+  limite de 12 parágrafos por seção (a saída estruturada da API não aceita limite de tamanho; um
+  rascunho de 26 parágrafos gastava uma tentativa).
+- **Deploy**: o compose monta `/data/1000bg_vcf` **somente leitura** em todos os serviços —
+  recriar web e workers (`docker compose up -d`) **sem run ativo** (um worker antigo não grava
+  o atestado das entradas e o envelope falha fechado). Resíduos declarados em ISSUES.
+
+### ⚠️ Mudanças de comportamento da revisão adversarial da F2 (42 achados, 2026-10-19/25)
+- **Entrada por caminho só da caixa de entrada** `<dados>/entradas/` (e `modules/*/demo_data|data`).
+  Antes valia qualquer `/data/...` — com o token, dava para ler a 1ª linha de qualquer arquivo
+  de `E:\data`. Inexistente e fora da raiz respondem o MESMO 422 (sem oráculo de existência).
+- **`PUT /entradas`**: `Content-Type` só `application/octet-stream` (arquivo cru) ou
+  `application/json` (`{"caminho"}`); o resto é 415. **`POST /executar`** recusa corpo e query
+  (422): o passo roda só o plano aprovado.
+- **Matriz de contagens**: `gene_name` passa a ser obrigatório (2ª coluna) — o DESeq2 do
+  pipeline quebrava sem ele depois de rodar. Sem nomes, o adaptador repete o `gene_id`
+  (operação nova `copiar`, só nesse par).
+- **Coldata**: exatamente 2 condições com ≥2 réplicas (com 3+, o R testava em silêncio o último
+  nível em ordem alfabética); níveis ASCII seguros para argv e sem `vs_`/`_vs` na borda;
+  amostra ou condição que o R converte (número, lógico, `NA`) reprovam — o R escolhia as
+  colunas da matriz por POSIÇÃO.
+- **TSV lido como o `read.delim` lê**: células não são mais aparadas, aspas reprovam (o R abre
+  um campo que engole linhas), linha só com TAB reprova, nº de campos diferente do cabeçalho
+  reprova. Leitura em fluxo, com tetos de linhas físicas, genes e amostras.
+- **Volcano dos pipelines = `volcano_api.py`** (novo): rotula pelo contraste que o DESeq2 de
+  fato calculou. O `volcano_plot.py` selado anunciava "verão vs inverno" mesmo com a
+  referência invertida; ele continua no workflow selado `wf_de_granulosa`.
+- Todo erro sob `/api/v1` vem como `{"detail": {"erro": ...}}` (inclusive 404, 405 e 500).
+- `OMICA_MAX_RUNS_ABERTOS` (padrão 20) limita runs ainda não aprovados.
+- **Reiniciar os workers** (`omica-worker*`) depois de atualizar: o executor de scripts agora
+  atesta o código antes e depois de rodar e o sha256 de cada saída.
+
+### Corrigido — revisão adversarial da F2
+- **Proveniência atestada pelo worker**: o sha do código é tirado ao começar e ao terminar
+  (editado no meio = erro), e o sha256 de cada porta é gravado pelo worker no `done`; o
+  envelope compara com isso — troca de arquivo com mtime preservado reprova. Receita única
+  em `omica/proveniencia.py`.
+- **Estado e concorrência**: abortar cancela os jobs ainda na fila (um job perdido pelo Redis
+  não prende mais a vaga); lançamento em duas gravações com reconciliação (falha ao gravar o
+  `run.json` não lança um 2º job na mesma saída); passo com portão reprovado leva o run a
+  `erro`; promoção de estado com contador de versão (sem ABA); `status.json` atômico; run
+  existente não depende mais do catálogo atual de pipelines; escolhas guardadas no registro
+  (o polling não relê o coldata); GET do run com checagem leve dos passos já entregues.
+- **API**: `PUT /entradas` não congela mais o servidor (trabalho síncrono fora do event loop);
+  token conferido antes de ler o corpo; tetos de corpo; executar compara também runtime, fila,
+  RAM e CPUs do manifest com o plano; porta grande demais para sha256 não passa; sha do plano
+  sobre o JSON que vai ao disco.
+- **Adaptador**: falha de VALOR de célula nunca vai ao LLM (o modelo trocava "sexo" por
+  "condicao" e o DESeq2 passaria a testar outra coisa); operação que tira o nome-alvo de uma
+  coluna que já o tinha é descartada, venha do modelo ou do autor; arquivo acima do teto do
+  formato ou de 64 MiB não é lido.
+- **Contrato**: chave de `relatorio.tabelas` tem de ser coluna única do formato; `tabela_de`
+  reprova `gene_id` repetido; travas de `{dados}`/`{saida}` decidem pelo nome do campo
+  (`{dados!s}` não escapa mais); validadores nunca levantam exceção (campo gigante, JSON
+  aninhado fundo, diretório) — reprovam.
+- Testes: canário real de `manifest_mudou`/`script_mudou` (sem mock da função testada), das
+  transições de estado e de cada trava do `{saida}`; o conftest isola toda variável `OMICA_*`
+  do shell. Cada correção foi conferida por mutação (o teste reprova sem ela).
+
 ## [Unreleased] · Correção dos rótulos de raça nas demos de Fst e ML (2026-10-19)
 
 As listas de raça do 1000 Bull Genomes (`E:\data\1000bg_metadata\samples_*.txt`) estavam com os

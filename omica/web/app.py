@@ -10,13 +10,20 @@ Decisões herdadas da auditoria de 2026-09-01:
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from pathlib import Path
+from typing import Optional
 
 import markdown as md
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from omica import __version__
 from omica import professor as prof
@@ -37,6 +44,42 @@ app = FastAPI(title="ômica", version=__version__, docs_url="/api/docs")
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 # API JSON para orquestradores (n8n). Exige token; sem OMICA_API_TOKEN responde 503.
 app.include_router(api_v1.router)
+
+
+# Erros sob /api/v1 que não passam por rota nenhuma da API (revisão F2, resíduo do #33): a
+# `_RotaV1` só envolve rota que CASOU, então 404 de caminho inexistente e 405 de método
+# errado saíam como {"detail": "Not Found"} — sem `erro`, e o 405 antes do 401 —, e uma
+# exceção não tratada virava 500 em texto puro. No n8n, `$json.body.detail.erro` ficava
+# undefined. Fora do prefixo, tudo segue o tratamento padrão (a UI HTML não muda).
+@app.exception_handler(StarletteHTTPException)
+async def _erro_http(request: Request, exc: StarletteHTTPException):
+    if not api_v1.na_api_v1(request.scope):
+        return await http_exception_handler(request, exc)
+    if not isinstance(exc.detail, dict):
+        # `detail` em texto = levantado pelo framework, não por uma rota da API — o 404/405
+        # do roteamento nem chegou à conferência do token. Sem credencial, a resposta é a do
+        # token (401/503), como em toda a API: o 405 não diz a quem não se autenticou que a
+        # rota existe com outro método.
+        try:
+            await api_v1.conferir_token_antes(request, request.app.dependency_overrides)
+        except StarletteHTTPException as recusa:
+            exc = recusa
+    headers = getattr(exc, "headers", None)
+    return JSONResponse(status_code=exc.status_code, headers=headers, content={
+        "detail": api_v1.detalhe_do_contrato(exc.status_code, exc.detail, headers)})
+
+
+@app.exception_handler(Exception)
+async def _erro_interno(request: Request, exc: Exception):
+    """500 sob /api/v1 no formato do contrato e SEM a mensagem da exceção (pode trazer
+    caminho, trecho de arquivo ou do .env); o traceback fica no log do servidor, que o
+    Starlette continua emitindo. Fora do prefixo, a mesma resposta padrão de antes."""
+    if not api_v1.na_api_v1(request.scope):
+        return PlainTextResponse("Internal Server Error", status_code=500)
+    return JSONResponse(status_code=500, content={"detail": {
+        "erro": "erro_interno", "detalhe": "exceção não tratada no servidor (detalhes no log da ômica)"}})
+
+
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
 templates.env.globals.update(t=t, versao=__version__, status_types=STATUS_TYPES)
 
@@ -174,7 +217,9 @@ async def job_events(job_id: str):
                     for linha in f:
                         yield f"data: {linha.rstrip()}\n\n"
                     posicao = f.tell()
-            status = queue.read_status(job_id)
+            # read_status lê o status.json e, numa troca em andamento, relê com time.sleep:
+            # fora do event loop, senão cada console aberto parava o servidor a cada polling
+            status = await run_in_threadpool(queue.read_status, job_id)
             if status and status.get("status") in ("done", "error"):
                 yield f"event: fim\ndata: {status['status']}\n\n"
                 break
@@ -296,6 +341,54 @@ def servir_resultado(rel: str):
     from fastapi.responses import FileResponse
 
     return FileResponse(caminho)
+
+
+_FIGURA_RELATORIO = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-]{0,120}\.png", re.ASCII)
+
+
+def _pasta_relatorio(run_id: str) -> Optional[Path]:
+    """results/<mod>/runs/<run_id>/relatorio — o módulo vem do run.json, nunca da URL."""
+    from omica import runs
+
+    try:
+        run = json.loads((runs._pasta(run_id) / "run.json").read_text(encoding="utf-8"))
+    except (runs.ErroRun, OSError, ValueError):
+        return None
+    pasta = get_config().results_dir / run["modulo"] / "runs" / run_id / "relatorio"
+    return pasta if (pasta / "relatorio.html").is_file() else None
+
+
+@app.get("/relatorios/{run_id}")
+def relatorio_sem_barra(run_id: str):
+    # a página cita as figuras por caminho RELATIVO (figuras/x.png): precisa da barra final
+    if _pasta_relatorio(run_id) is None:
+        return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"/relatorios/{run_id}/", status_code=307)
+
+
+@app.get("/relatorios/{run_id}/", response_class=HTMLResponse)
+def relatorio(run_id: str):
+    """Relatório de um run, como o portão de números o aprovou (HTML já escapado no render;
+    a CSP vai também no cabeçalho, além da meta da própria página)."""
+    pasta = _pasta_relatorio(run_id)
+    if pasta is None:
+        return RedirectResponse("/", status_code=303)
+    return HTMLResponse((pasta / "relatorio.html").read_text(encoding="utf-8"), headers={
+        "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"})
+
+
+@app.get("/relatorios/{run_id}/figuras/{nome}")
+def relatorio_figura(run_id: str, nome: str):
+    pasta = _pasta_relatorio(run_id)
+    if pasta is None or not _FIGURA_RELATORIO.fullmatch(nome):
+        return RedirectResponse("/", status_code=303)
+    base = (pasta / "figuras").resolve()
+    caminho = (base / nome).resolve()
+    if not caminho.is_file() or caminho.parent != base:
+        return RedirectResponse("/", status_code=303)
+    from fastapi.responses import FileResponse
+
+    return FileResponse(caminho, media_type="image/png")
 
 
 @app.get("/saude")

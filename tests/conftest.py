@@ -9,6 +9,9 @@ testes de fila quebravam quando havia outro job pesado rodando (auditoria de
 2026-09-14: 4 failed com a máquina a 83%, 0 failed com ela ociosa) — o CI verde
 só significava "o runner estava vazio". Testes que exercitam a guarda continuam
 monkeypatchando psutil dentro do próprio teste, e passam a valer de verdade.
+
+Pelo mesmo motivo, nenhuma OMICA_* do shell chega aos testes (revisão F2, achado #38): os
+limites de runs eram lidos do ambiente e mudavam o veredito da suíte.
 """
 from __future__ import annotations
 
@@ -26,8 +29,22 @@ class _MemoriaFake:
         self.percent = percent
 
 
+# Opções do PRÓPRIO harness de teste (ex.: OMICA_SMOKE_REDE=1 liga o smoke com rede): o
+# autor exporta de propósito para a rodada, e elas não mudam a plataforma.
+_OPCOES_DO_HARNESS = ("OMICA_SMOKE_",)
+
+
 @pytest.fixture(autouse=True)
 def ambiente_isolado(tmp_path, monkeypatch):
+    # Toda OMICA_* exportada no shell sai antes de cada teste; as que a suíte precisa são
+    # postas logo abaixo. Revisão F2 (achado #38): runs.py lê OMICA_MAX_RUNS_ATIVOS e
+    # OMICA_MAX_RUNS_ABERTOS direto do ambiente, e com OMICA_MAX_RUNS_ATIVOS=2 no shell o
+    # test_um_run_ativo_por_vez reprovava (200 em vez de 409) — e um canário de limite
+    # passaria a aprovar. Varrer o prefixo, e não listar nomes, cobre a próxima variável
+    # lida direto do ambiente sem depender de alguém lembrar de acrescentá-la aqui.
+    for nome in [n for n in os.environ if n.upper().startswith("OMICA_")]:
+        if not nome.upper().startswith(_OPCOES_DO_HARNESS):
+            monkeypatch.delenv(nome, raising=False)
     monkeypatch.setenv("OMICA_DATA", str(tmp_path / "dados"))
     monkeypatch.setenv("GENOME_DATA", str(tmp_path))
     monkeypatch.setenv("OMICA_REDIS_URL", "")
@@ -41,7 +58,7 @@ def ambiente_isolado(tmp_path, monkeypatch):
     # `env or .env or default`: um OMICA_API_TOKEN="" no ambiente NÃO força "vazio" —
     # cairia no .env e a suíte passaria a depender (e a poder imprimir) do segredo real.
     monkeypatch.setattr(config_mod, "_ler_dotenv", lambda caminho: {})
-    monkeypatch.delenv("OMICA_API_TOKEN", raising=False)
+    monkeypatch.delenv("OMICA_API_TOKEN", raising=False)  # já saiu na varredura; explícito de propósito
     # interruptor da GPU fictício: os testes nunca leem o switch.json real do autor
     monkeypatch.setenv("OMICA_GPU_SWITCH", str(tmp_path / "gpu_switch" / "switch.json"))
     reset_config_cache()

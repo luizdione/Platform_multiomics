@@ -20,10 +20,10 @@ from typing import Any, Optional
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from omica.agentes.motor_local import MotorIndisponivel, chat_json
 from omica.config import get_config
 from omica.registry import load_registry
-
-TIMEOUT_S = 180  # primeira carga de um modelo 14b pode levar ~1 min
+from omica.saude import estado_gpu
 
 SISTEMA = """Você é o Professor Ômico, o agente didático da plataforma ômica
 (bioinformática bovina; público: pesquisador e alunos do IFRJ; responda em PT-BR).
@@ -165,6 +165,14 @@ def perguntar(frase: str, arquivo: str = "", modelo: str = "") -> dict[str, Any]
     """Frase humana → plano validado. Nunca executa nada: quem executa é o
     botão da UI, pelas MESMAS rotas determinísticas de módulo."""
     cfg = get_config()
+    # A GPU é do dono (switch.json): reservada para MD/Boltz/render — ou interruptor
+    # ausente — o Professor não chama o modelo nem consulta o Ollama. Antes da F3 ele
+    # chamava direto e podia carregar um 14b no meio de uma dinâmica molecular.
+    gpu = estado_gpu()
+    if not gpu["liberada"]:
+        return {"status": "motor_indisponivel",
+                "detalhe": f"GPU reservada pelo dono ({gpu['estado']}): {gpu['motivo']}",
+                "biblioteca": fora_do_catalogo(frase)}
     ok, modelo_ativo = motor_disponivel()
     if not ok:
         return {"status": "motor_indisponivel",
@@ -174,23 +182,16 @@ def perguntar(frase: str, arquivo: str = "", modelo: str = "") -> dict[str, Any]
     pergunta = frase.strip()
     if arquivo.strip():
         pergunta += f"\n(arquivo informado pelo usuário: {arquivo.strip()})"
-    corpo = {
-        "model": modelo,
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.2},
-        "messages": [
-            {"role": "system",
-             "content": SISTEMA.replace("{catalogo}", json.dumps(catalogo(), ensure_ascii=False))},
-            {"role": "user", "content": pergunta},
-        ],
-    }
+    sistema = SISTEMA.replace("{catalogo}", json.dumps(catalogo(), ensure_ascii=False))
     try:
-        r = httpx.post(f"{cfg.ollama_url}/api/chat", json=corpo, timeout=TIMEOUT_S)
-        r.raise_for_status()
-        conteudo = r.json()["message"]["content"]
-        plano = Plano.model_validate(_extrair_json(conteudo))
-    except (httpx.HTTPError, KeyError, ValueError, ValidationError) as e:
+        # mesma porta do adaptador: interruptor relido + uma chamada ao LLM por vez
+        resposta = chat_json(sistema, pergunta, "json", modelo=modelo, temperatura=0.2)
+        plano = Plano.model_validate(resposta["dados"])
+    except MotorIndisponivel as e:
+        status = ("motor_indisponivel" if e.codigo in ("gpu_reservada", "gpu_desconhecida", "motor_ocupado")
+                  else "erro_do_motor")
+        return {"status": status, "detalhe": e.detalhe, "biblioteca": fora_do_catalogo(frase)}
+    except (KeyError, ValueError, ValidationError) as e:
         return {"status": "erro_do_motor", "detalhe": f"{e.__class__.__name__}: {e}",
                 "biblioteca": fora_do_catalogo(frase)}
     erro = _validar_contra_catalogo(plano)

@@ -65,10 +65,10 @@ scripts:
       --min-cov {min_cov} --diff 15 --qvalue 0.05
       --saida {dados}/results/epigenomica/demo/dmc
     params:
-      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data"}
-      - {name: grupo_a, rotulo: "Grupo A (padrão no nome do arquivo)", default: "Nelore"}
-      - {name: grupo_b, rotulo: "Grupo B (padrão no nome do arquivo)", default: "HF"}
-      - {name: min_cov, rotulo: "Cobertura mínima por CpG", default: "5"}
+      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data", tipo: dir}
+      - {name: grupo_a, rotulo: "Grupo A (padrão no nome do arquivo)", default: "Nelore", tipo: texto}
+      - {name: grupo_b, rotulo: "Grupo B (padrão no nome do arquivo)", default: "HF", tipo: texto}
+      - {name: min_cov, rotulo: "Cobertura mínima por CpG", default: "5", tipo: inteiro}
     inputs: ["modules/epigenomica/demo_data"]
     outputs: ["results/epigenomica/demo/dmc/dmc.tsv", "results/epigenomica/demo/dmc/todas_cpgs.tsv", "results/epigenomica/demo/dmc/dmc_resumo.json"]
     mem_gb: 3
@@ -98,7 +98,7 @@ scripts:
       --grupo-a Nelore --grupo-b HF --janela 2000 --bin 100
       --saida {dados}/results/epigenomica/demo/tss
     params:
-      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data"}
+      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data", tipo: dir}
     inputs: ["modules/epigenomica/demo_data", "modules/epigenomica/data/paineis/painel_108.json"]
     outputs: ["results/epigenomica/demo/tss/tss_perfil.png", "results/epigenomica/demo/tss/tss_resumo.json"]
     mem_gb: 1
@@ -116,8 +116,8 @@ scripts:
       --q-max {q_max} --top-n {top_n} --flanco 100
       --saida {dados}/results/epigenomica/demo/motifs
     params:
-      - {name: q_max, rotulo: "q máximo (relaxado p/ demo)", default: "0.25"}
-      - {name: top_n, rotulo: "Top CpGs por |diff|", default: "200"}
+      - {name: q_max, rotulo: "q máximo (relaxado p/ demo)", default: "0.25", tipo: decimal}
+      - {name: top_n, rotulo: "Top CpGs por |diff|", default: "200", tipo: inteiro}
     inputs: ["results/epigenomica/demo/dmc/todas_cpgs.tsv", "E:\\data\\snpeff_data\\ARS-UCD1.3.113\\sequences.fa"]
     outputs: ["results/epigenomica/demo/motifs/motifs_top.tsv", "results/epigenomica/demo/motifs/motifs_resumo.json"]
     mem_gb: 6
@@ -133,7 +133,7 @@ scripts:
       --promotor 2000 --min-amostras 4
       --saida {dados}/results/epigenomica/demo/mofa/views
     params:
-      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data"}
+      - {name: dir_cov, rotulo: "Diretório dos .cov.gz", default: "modules/epigenomica/demo_data", tipo: dir}
     inputs: ["modules/epigenomica/demo_data", "modules/epigenomica/data/paineis/painel_108.json"]
     outputs: ["results/epigenomica/demo/mofa/views/view_promotor.tsv", "results/epigenomica/demo/mofa/views/view_corpo.tsv", "results/epigenomica/demo/mofa/views/views_resumo.json"]
     mem_gb: 1

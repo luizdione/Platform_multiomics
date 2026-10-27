@@ -60,12 +60,12 @@ scripts:
       --maf {maf} --passo {passo}
       --saida {dados}/results/ml/demo/dataset
     params:
-      - {name: vcf, rotulo: "VCF/BCF com genótipos", default: "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf"}
-      - {name: regiao, rotulo: "Região", default: "14:1-2500000"}
-      - {name: grupo_a, rotulo: "Grupo A", default: "Angus=/data/1000bg_metadata/samples_angus.txt"}
-      - {name: grupo_b, rotulo: "Grupo B", default: "Brahman=/data/1000bg_metadata/samples_brahman.txt"}
-      - {name: maf, rotulo: "MAF mínimo", default: "0.2"}
-      - {name: passo, rotulo: "Afinamento (1 a cada N)", default: "15"}
+      - {name: vcf, rotulo: "VCF/BCF com genótipos", default: "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf", tipo: caminho}
+      - {name: regiao, rotulo: "Região", default: "14:1-2500000", tipo: texto}
+      - {name: grupo_a, rotulo: "Grupo A", default: "Angus=/data/1000bg_metadata/samples_angus.txt", tipo: grupo}
+      - {name: grupo_b, rotulo: "Grupo B", default: "Brahman=/data/1000bg_metadata/samples_brahman.txt", tipo: grupo}
+      - {name: maf, rotulo: "MAF mínimo", default: "0.2", tipo: decimal}
+      - {name: passo, rotulo: "Afinamento (1 a cada N)", default: "15", tipo: inteiro}
     inputs: ["E:\\data\\1000bg_vcf", "E:\\data\\1000bg_metadata"]
     outputs: ["results/ml/demo/dataset/genotipos.tsv", "results/ml/demo/dataset/rotulos.tsv", "results/ml/demo/dataset/dataset_resumo.json"]
     mem_gb: 2
@@ -84,7 +84,7 @@ scripts:
       --k-painel {k_painel}
       --saida {dados}/results/ml/demo/classificacao
     params:
-      - {name: k_painel, rotulo: "Tamanho do painel mínimo (top-k)", default: "50"}
+      - {name: k_painel, rotulo: "Tamanho do painel mínimo (top-k)", default: "50", tipo: inteiro}
     inputs: ["results/ml/demo/dataset/genotipos.tsv", "results/ml/demo/dataset/rotulos.tsv"]
     outputs: ["results/ml/demo/classificacao/ml_resumo.json", "results/ml/demo/classificacao/shap_top.tsv", "results/ml/demo/classificacao/shap_top.png"]
     mem_gb: 4
@@ -104,8 +104,8 @@ scripts:
       --k-painel {k_painel} --n-boot {n_boot}
       --saida {dados}/results/ml/demo/robustez
     params:
-      - {name: k_painel, rotulo: "Tamanho do painel (top-k)", default: "50"}
-      - {name: n_boot, rotulo: "Reamostragens bootstrap", default: "100"}
+      - {name: k_painel, rotulo: "Tamanho do painel (top-k)", default: "50", tipo: inteiro}
+      - {name: n_boot, rotulo: "Reamostragens bootstrap", default: "100", tipo: inteiro}
     inputs: ["results/ml/demo/dataset/genotipos.tsv", "results/ml/demo/dataset/rotulos.tsv"]
     outputs: ["results/ml/demo/robustez/robustez_resumo.json", "results/ml/demo/robustez/nucleo_estavel.tsv", "results/ml/demo/robustez/robustez.png"]
     mem_gb: 4

@@ -1,0 +1,82 @@
+# Pipeline orquestrável (n8n): expressão diferencial + volcano.
+#
+# Diferente dos workflows selados do manifest (wf_de_granulosa), que rodam com caminhos
+# FIXOS do demo, este pipeline recebe as entradas do usuário e grava cada passo na pasta
+# do run (results/transcriptomica/runs/<run_id>/<passo>/) — o demo nunca é sobrescrito.
+#
+# A ponte entre passos é declarativa (`liga`) e TIPADA: o formato que um passo produz tem
+# de ser o formato que o seguinte consome (conferido no load por omica/pipelines.py).
+# LLM só entra nas ENTRADAS marcadas `adaptavel` (dados do usuário com cabeçalhos
+# arbitrários) e sempre antes da aprovação do plano.
+id: transcriptomica_de
+modulo: transcriptomica
+titulo: "Expressão diferencial (DESeq2) + volcano"
+descricao: >-
+  Matriz de contagens genes × amostras e tabela de amostras com a condição de cada uma →
+  DESeq2 (contraste entre duas condições) → volcano plot com os genes mais significativos.
+
+entradas:
+  counts:
+    formato: contagens_genes
+    adaptavel: true
+    rotulo: "Matriz de contagens (genes × amostras; gene_id e gene_name)"
+    exemplo: modules/transcriptomica/demo_data/counts_granulosa.tsv
+  coldata:
+    formato: coldata
+    adaptavel: true
+    rotulo: "Tabela de amostras (amostra, condição; exatamente 2 condições)"
+    exemplo: modules/transcriptomica/demo_data/coldata_granulosa.tsv
+
+# Checagens que cruzam entradas (formatos.contagens_e_coldata): o DESeq2 escolhe as colunas
+# da matriz PELOS NOMES do coldata.
+checagens_entrada:
+  - {tipo: contagens_e_coldata, contagens: counts, coldata: coldata}
+
+# Decisões científicas do autor. Só podem receber valores REAIS do dado (dropdown).
+escolhas_autor:
+  referencia:
+    rotulo: "Condição de referência (o controle do contraste)"
+    valores_de: coldata.condicao
+
+passos:
+  - id: de
+    script: deseq2
+    liga:
+      counts: entrada.counts
+      coldata: entrada.coldata
+      referencia: escolha.referencia
+    params: {padj: "0.05", lfc: "1"}
+  - id: volcano
+    script: volcano
+    liga:
+      de: de.de_table
+      # o rótulo da figura vem do contraste que o DESeq2 DE FATO calculou com a referência
+      # escolhida pelo autor (de_resumo.json), nunca de texto fixo do demo
+      resumo: de.de_resumo
+    # "=passo.param" = mesmo valor usado no passo anterior (cortes coerentes entre passos)
+    params: {padj: "=de.padj", lfc: "=de.lfc"}
+
+relatorio:
+  figuras: [volcano.volcano_png]
+  resumos: [de.de_resumo, volcano.volcano_resumo]
+  tabelas:
+    - {passo: de, porta: de_table, chave: gene_id, colunas: [gene_name, log2FoldChange, padj], top: {n: 10, ordenar: padj}}
+  # Conferências aritméticas do portão de números (R4), com a MESMA regra do
+  # expressao_deseq2.R: padj < corte (NA fora) e |log2FC| >= corte.
+  invariantes:
+    - {tipo: soma, partes: [de.de_resumo.n_up, de.de_resumo.n_down], total: de.de_resumo.n_deg_padj_e_lfc}
+    - {tipo: igual, a: volcano.volcano_resumo.n_significativos, b: de.de_resumo.n_deg_padj_e_lfc}
+    - tipo: recontagem
+      tabela: de.de_table
+      filtros:
+        - {coluna: padj, menor_que: de.de_resumo.criterios.padj}
+        - {coluna: log2FoldChange, abs_maior_ou_igual: de.de_resumo.criterios.lfc}
+      total: de.de_resumo.n_deg_padj_e_lfc
+    - tipo: recontagem
+      tabela: de.de_table
+      filtros: [{coluna: padj, menor_que: de.de_resumo.criterios.padj}]
+      total: de.de_resumo.n_deg_padj
+
+# Selo do pipeline: preenchido só depois de um E2E real pelo n8n (selos de pipeline ficam
+# fora dos manifests — selos.regravar() grava por posição e quebraria).
+selo_pipeline: {testado_em: "", hash: ""}

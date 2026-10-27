@@ -12,8 +12,11 @@ e o console SSE só precise ler arquivo (nada em memória de processo).
 """
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
+import os
+import re
 import threading
 import time
 import traceback
@@ -23,8 +26,21 @@ from typing import Any, Optional
 
 from omica.config import get_config
 from omica.jobs import guarda_ram
+from omica.travas import TravaOcupada, trava
 
 FILA_DEFAULT = "omica"
+# O RQ só aceita id de job com letras, dígitos, '_' e '-' (rq.job.JOB_ID_PATTERN). Com o
+# MESMO id no RQ e no status.json, cancelar um job na fila é um Job.fetch(job_id).
+_ID_RQ = re.compile(r"[A-Za-z0-9_-]+")
+
+# Releitura de status.json (revisão F2, #9/#24): no host Windows o leitor pode pegar o
+# arquivo no instante do os.replace (PermissionError) — no Linux o rename é atômico e a
+# primeira leitura já basta. 12 tentativas de 1 ms × i somam ~80 ms no pior caso: curto
+# o bastante para o console SSE, que chama read_status de dentro do event loop.
+_TENTATIVAS_LEITURA = 12
+# os.replace no Windows falha com PermissionError enquanto um leitor está com o destino
+# aberto; 40 tentativas de 2 ms × i somam ~1,6 s antes de desistir.
+_TENTATIVAS_TROCA = 40
 
 
 class FilaIndisponivel(RuntimeError):
@@ -32,10 +48,53 @@ class FilaIndisponivel(RuntimeError):
     a thread local roda no container web, que NÃO tem as ferramentas bioinfo."""
 
 
+class JobCancelado(RuntimeError):
+    """O job foi cancelado (ex.: run abortado) enquanto esperava na fila: nada rodou."""
+
+
 def _job_dir(job_id: str) -> Path:
     d = get_config().jobs_dir / job_id
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _ler_status(caminho: Path) -> Optional[dict[str, Any]]:
+    """None = arquivo AUSENTE (resposta imediata) ou ilegível mesmo depois de reler.
+
+    Releitura com espera curta: um leitor que cai no meio de uma troca (PermissionError no
+    Windows) ou num arquivo pela metade não pode concluir "não existe". Esse None era o que
+    fazia o executar relançar um passo em andamento e o envelope dar falha terminal falsa."""
+    if not caminho.exists():
+        return None
+    for i in range(_TENTATIVAS_LEITURA):
+        try:
+            dados = json.loads(caminho.read_text(encoding="utf-8"))
+            if isinstance(dados, dict):
+                return dados
+        except (OSError, ValueError):  # ValueError cobre JSONDecodeError e UnicodeDecodeError
+            pass
+        time.sleep(0.001 * (i + 1))
+    return None
+
+
+def _gravar_atomico(caminho: Path, texto: str) -> None:
+    """Grava num temporário da MESMA pasta e troca com os.replace (mesmo padrão de
+    runs._gravar). O write_text direto truncava o arquivo antes de escrever: quem lesse no
+    meio via JSON quebrado, e um disco cheio no meio deixava o status corrompido de vez."""
+    tmp = caminho.with_name(f"{caminho.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        tmp.write_text(texto, encoding="utf-8")
+        for i in range(_TENTATIVAS_TROCA):
+            try:
+                os.replace(tmp, caminho)
+                return
+            except PermissionError:  # Windows: destino aberto por um leitor
+                if i == _TENTATIVAS_TROCA - 1:
+                    raise
+                time.sleep(0.002 * (i + 1))
+    finally:  # depois do replace bem-sucedido ele já não existe; falha aqui não mascara a original
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
 
 
 def write_status(job_id: str, status: str, **extra: Any) -> None:
@@ -46,24 +105,15 @@ def write_status(job_id: str, status: str, **extra: Any) -> None:
         **extra,
     }
     caminho = _job_dir(job_id) / "status.json"
-    anterior: dict[str, Any] = {}
-    if caminho.exists():
-        try:
-            anterior = json.loads(caminho.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            anterior = {}
+    # Ilegível mesmo depois de reler (só com dano externo, já que a gravação é atômica)
+    # recomeça do zero, como antes: sem run_id/passo o envelope falha FECHADO.
+    anterior: dict[str, Any] = _ler_status(caminho) or {}
     anterior.update(payload)
-    caminho.write_text(json.dumps(anterior, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    _gravar_atomico(caminho, json.dumps(anterior, indent=2, ensure_ascii=False, default=str))
 
 
 def read_status(job_id: str) -> Optional[dict[str, Any]]:
-    caminho = get_config().jobs_dir / job_id / "status.json"
-    if not caminho.exists():
-        return None
-    try:
-        return json.loads(caminho.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
+    return _ler_status(get_config().jobs_dir / job_id / "status.json")
 
 
 def append_log(job_id: str, linha: str) -> None:
@@ -79,11 +129,35 @@ def novo_job_id(prefixo: str) -> str:
     return f"{prefixo}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
 
 
+def _trava_do_job(job_id: str) -> Path:
+    return _job_dir(job_id) / ".trava"
+
+
+def _comecar(job_id: str) -> None:
+    """queued → running. É a MESMA decisão do `cancelar` (queued → error), e as duas correm
+    sob a trava do job: sem ela, o worker podia ler 'queued', o abortar cancelar e o worker
+    gravar 'running' por cima — o job rodava com o run já fora da conta de vagas. Trava
+    ocupada além da espera (só com dano externo: o cancelar a segura por milissegundos) não
+    prende o job: começa assim mesmo, e o `cancelado` ainda é conferido."""
+    with contextlib.ExitStack() as pilha:
+        with contextlib.suppress(TravaOcupada):
+            pilha.enter_context(trava(_trava_do_job(job_id), 10.0))
+        atual = read_status(job_id) or {}
+        if atual.get("cancelado"):
+            append_log(job_id, f"job cancelado antes de começar ({atual.get('error')}): nada foi executado")
+            raise JobCancelado(job_id)
+        # `iniciado_em` (epoch) é o que permite à API v1 distinguir um artefato escrito POR
+        # ESTE job de um que sobrou de uma rodada anterior no mesmo caminho (EXP-2, revisão F1).
+        write_status(job_id, "running", iniciado_em=time.time())
+
+
 def executar_por_caminho(func_path: str, job_id: str) -> None:
-    """Resolve 'pacote.modulo.funcao' e executa. Usado pelo RQ e pelo fallback."""
+    """Resolve 'pacote.modulo.funcao' e executa. Usado pelo RQ e pelo fallback. Job
+    cancelado na fila levanta JobCancelado SEM tocar no status (que já diz 'error' com o
+    motivo) e sem rodar nada: o RQ o dá por falho e a cadeia (enqueue_cadeia) não segue."""
     mod_name, _, func_name = func_path.rpartition(".")
     func = getattr(importlib.import_module(mod_name), func_name)
-    write_status(job_id, "running")
+    _comecar(job_id)
     try:
         func(job_id)
         # a própria função marca "done" com os campos dela; garante o mínimo:
@@ -129,11 +203,58 @@ def enqueue(func_path: str, prefixo: str, mem_gb: float = 0.5,
     job_id = novo_job_id(prefixo)
     write_status(job_id, "queued", mem_gb=mem_gb, func=func_path, fila=fila, **meta)
     if q is not None:
-        q.enqueue(executar_por_caminho, func_path, job_id, job_timeout=timeout_s)
+        extra = {"job_id": job_id} if _ID_RQ.fullmatch(job_id) else {}
+        try:
+            q.enqueue(executar_por_caminho, func_path, job_id, job_timeout=timeout_s, **extra)
+        except Exception as e:
+            # O status já diz 'queued' e nenhum worker vai pegar o job: sem isto ele ficava
+            # 'queued' para sempre, segurando o orçamento de RAM e a vaga de run. Marcado
+            # `cancelado` também: se o comando chegou ao Redis e só a resposta se perdeu, o
+            # worker que pegar o job não o roda (_comecar) — quem chamou já deu o lançamento
+            # por falho e pode lançar outro na MESMA pasta de saída (revisão F2, #13).
+            write_status(job_id, "error", error=f"falha ao enfileirar: {e}", cancelado=True)
+            raise
         return job_id, "rq"
     t = threading.Thread(target=_thread_segura, args=(func_path, job_id), daemon=True)
     t.start()
     return job_id, "thread"
+
+
+def _cancelar_no_rq(job_id: str) -> None:
+    """Tira o job da fila do RQ, quando dá. Job enfileirado com id próprio do RQ (antes de o
+    id do RQ ser o nosso), Redis fora ou job já perdido: nada a fazer aqui — o `cancelado` do
+    status.json é o que impede o worker de rodá-lo (`_comecar`)."""
+    q = _rq_queue()
+    if q is None:
+        return
+    with contextlib.suppress(Exception):
+        from rq.job import Job
+
+        Job.fetch(job_id, connection=q.connection).cancel()
+
+
+def cancelar(job_id: str, motivo: str) -> bool:
+    """Cancela um job que AINDA ESTÁ NA FILA: status 'error' com `cancelado` e o motivo, e o
+    job sai do RQ. Devolve True se cancelou. Job que já começou (running), terminou, tem status
+    ilegível ou cuja trava está ocupada não é tocado (False): quem roda termina sozinho.
+
+    Também é a saída do job PERDIDO na fila — o Redis do compose não tem volume, e um
+    `compose down/up` ou a queda de energia apagam a fila com o status.json ainda em 'queued',
+    que nunca vira órfão (uma fila de worker único pode esperar horas atrás de um job longo).
+    Sem Redis o cancelamento vale igual: o worker confere `cancelado` antes de começar."""
+    if not (get_config().jobs_dir / job_id / "status.json").exists():
+        return False
+    try:
+        with trava(_trava_do_job(job_id), 2.0):
+            atual = read_status(job_id)
+            if not atual or atual.get("status") != "queued":
+                return False
+            write_status(job_id, "error", error=motivo, cancelado=True, cancelado_em=time.time())
+    except TravaOcupada:
+        return False
+    _cancelar_no_rq(job_id)
+    append_log(job_id, f"cancelado na fila: {motivo}")
+    return True
 
 
 def _thread_segura(func_path: str, job_id: str) -> None:

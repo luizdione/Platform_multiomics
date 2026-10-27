@@ -303,6 +303,11 @@ class _RespostaFalsa:
 
 
 def _motor(monkeypatch, plano):
+    from omica.config import get_config
+
+    sw = get_config().gpu_switch  # desde a F3 o Professor só chama o LLM com a GPU liberada
+    sw.parent.mkdir(parents=True, exist_ok=True)
+    sw.write_text('{"estado": "on"}', encoding="utf-8")
     monkeypatch.setattr(professor, "motor_disponivel", lambda: (True, "modelo-de-teste"))
     monkeypatch.setattr(professor.httpx, "post",
                         lambda *a, **kw: _RespostaFalsa(json.dumps(plano)))

@@ -27,6 +27,12 @@ services:
     volumes:
       - ./:/app
       - "${GENOME_DATA:-E:/data}:/data"
+      # raiz de REFERÊNCIA (runs da genômica leem o BCF sem cópia) SOMENTE LEITURA, por cima
+      # do /data rw: nenhum container da omica escreve nela (crítica F5 #3). O :ro NÃO protege
+      # contra o host: o supervisor da madrugada relança o gtonly_1000bg.sh, que troca o .bcf
+      # — nunca deixe *-Run8-TAUIND-public.vcf.gz nessa pasta com run ativo. Cada raiz de
+      # OMICA_RAIZES_REFERENCIA (padrão: 1000bg_vcf) precisa de um bind :ro como este.
+      - "${GENOME_DATA:-E:/data}/1000bg_vcf:/data/1000bg_vcf:ro"
       - "${SKILLS_DIR:-C:/Users/luizd/.claude/skills_bioinfo}:/skills:ro"
       # interruptor da GPU do autor, só leitura (portão das chamadas a LLM local)
       - "${OLLAMA_DELEGATE_DIR:-C:/Users/luizd/.ollama_delegate}:/gpu_switch:ro"
@@ -58,6 +64,8 @@ services:
     volumes:
       - ./:/app
       - "${GENOME_DATA:-E:/data}:/data"
+      # raiz de referência só leitura (ver o serviço web)
+      - "${GENOME_DATA:-E:/data}/1000bg_vcf:/data/1000bg_vcf:ro"
       - "${SKILLS_DIR:-C:/Users/luizd/.claude/skills_bioinfo}:/skills:ro"
     depends_on:
       - redis
@@ -78,6 +86,8 @@ services:
     volumes:
       - ./:/app
       - "${GENOME_DATA:-E:/data}:/data"
+      # raiz de referência só leitura (ver o serviço web)
+      - "${GENOME_DATA:-E:/data}/1000bg_vcf:/data/1000bg_vcf:ro"
     depends_on:
       - redis
     restart: unless-stopped
@@ -97,6 +107,8 @@ services:
     volumes:
       - ./:/app
       - "${GENOME_DATA:-E:/data}:/data"
+      # raiz de referência só leitura (ver o serviço web)
+      - "${GENOME_DATA:-E:/data}/1000bg_vcf:/data/1000bg_vcf:ro"
     depends_on:
       - redis
     restart: unless-stopped
@@ -117,6 +129,8 @@ services:
     volumes:
       - ./:/app
       - "${GENOME_DATA:-E:/data}:/data"
+      # raiz de referência só leitura (ver o serviço web)
+      - "${GENOME_DATA:-E:/data}/1000bg_vcf:/data/1000bg_vcf:ro"
       - epigenoma_r_lib:/rlib
     depends_on:
       - redis
@@ -137,6 +151,8 @@ services:
     volumes:
       - ./:/app
       - "${GENOME_DATA:-E:/data}:/data"
+      # raiz de referência só leitura (ver o serviço web)
+      - "${GENOME_DATA:-E:/data}/1000bg_vcf:/data/1000bg_vcf:ro"
     depends_on:
       - redis
     restart: unless-stopped

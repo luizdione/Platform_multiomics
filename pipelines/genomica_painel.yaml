@@ -1,0 +1,97 @@
+# Pipeline orquestrável (n8n): painel de genes → variantes anotadas.
+#
+# Painel de símbolos → BED pelo GTF local (flanco de 15 kb) → extração das variantes das
+# janelas (bcftools view -R) → frequências alélicas (INFO/AF), efeitos SnpEff e consequências
+# VEP. Cada passo grava na pasta do run (results/genomica/runs/<run_id>/<passo>/): o demo
+# selado nunca é sobrescrito.
+#
+# A entrada CHAMA-SE "painel" de propósito: a cópia vira painel.txt e o coordenadas_painel.py
+# nomeia as saídas pelo STEM da entrada (painel.bed, painel_resumo.json — as portas do
+# manifest). O acoplamento não é expressável no contrato: tests/test_contrato.py o confere.
+# O painel não é adaptável: a adaptação grava '<nome>.adaptado.tsv', e o stem mudaria.
+#
+# O VCF entra por CAMINHO no servidor (o índice ao lado é obrigatório e não vai por upload):
+# por cópia, se o caminho cai na caixa de entrada (<dados>/entradas/ ou demo_data/), ou por
+# REFERÊNCIA, sem cópia, se cai numa raiz de referência (ex.: /data/1000bg_vcf, um BCF de
+# ~1 GB por cromossomo). Quem decide é o servidor, pela raiz.
+#
+# SnpEff e VEP leem o mesmo extraído, mas a execução é LINEAR: o executar de um passo exige o
+# portão aprovado de TODOS os anteriores (runs.executar_passo) — um SnpEff reprovado bloqueia
+# o VEP. Um BCF do Run 8 tem UM cromossomo: genes do painel em outros cromossomos não terão
+# variantes extraídas (o plano mostra os contigs com dados; o portão confere números, não
+# alcance).
+id: genomica_painel
+modulo: genomica
+titulo: "Painel de genes → variantes anotadas (Run 8, ARS-UCD1.2)"
+descricao: >-
+  Lista de símbolos de genes e um VCF.gz/BCF indexado → janelas dos genes no GTF local
+  (flanco de 15 kb) → variantes das janelas → frequências alélicas (INFO/AF), efeitos
+  SnpEff e consequências VEP.
+
+entradas:
+  painel:
+    formato: painel_simbolos
+    rotulo: "Painel de genes (.txt, um símbolo por linha; '#' na 1ª coluna comenta)"
+    exemplo: modules/genomica/data/paineis/termotolerancia.txt
+  vcf:
+    formato: vcf_indexado
+    modos: [copia, referencia]
+    # caminho relativo é resolvido a partir da raiz do REPO, não de <dados>: o rótulo cita o
+    # caminho absoluto do container (crítica F5 #12)
+    rotulo: >-
+      VCF.gz ou BCF indexado — caminho no servidor (modules/genomica/demo_data/…,
+      /data/omica/entradas/… ou /data/1000bg_vcf/…), com o .tbi/.csi ao lado
+    exemplo: modules/genomica/demo_data/demo_bta14_inicio.vcf.gz
+
+# Checagens ANTES de rodar (formatos.py): sem INFO/AF o frequencias aborta; contig 'chr14'
+# sai sem anotação com exit 0.
+checagens_entrada:
+  - {tipo: vcf_tem_info_af, vcf: vcf}
+  - {tipo: vcf_contigs_ars_ucd, vcf: vcf}
+
+# Parâmetros fixos aqui (o formulário não expõe parâmetro, e o sanitizador aceita negativo).
+passos:
+  - id: painel_bed
+    script: painel_bed
+    liga: {painel: entrada.painel}
+    params: {pad: "15000"}
+  - id: extracao
+    script: extracao
+    liga: {vcf: entrada.vcf, bed: painel_bed.bed}
+  - id: frequencias
+    script: frequencias
+    liga: {vcf: extracao.vcf}
+    params: {maf_corte: "0.05"}
+  - id: snpeff
+    script: snpeff
+    liga: {vcf: extracao.vcf}
+  - id: vep
+    script: vep
+    liga: {vcf: extracao.vcf}
+
+relatorio:
+  figuras: []
+  resumos: [painel_bed.painel_resumo, extracao.extracao_resumo, frequencias.frequencias_resumo,
+            snpeff.anotacao_resumo, vep.vep_resumo]
+  tabelas:
+    # sem top.ordenar: o ordenar é CRESCENTE (relatorio/fatos.py) e listaria os efeitos mais
+    # raros; o arquivo já vem em N decrescente (most_common)
+    - {passo: snpeff, porta: efeitos, chave: EFEITO, colunas: [N], top: {n: 10}}
+    - {passo: vep, porta: efeitos_vep, chave: CONSEQUENCIA, colunas: [N], top: {n: 10}}
+  # Conferências aritméticas (R4 do portão de números). Verdadeiras por construção dos
+  # scripts; cada uma tem um canário com resumos divergentes em tests/test_contrato.py.
+  #  - a extração conta uma região por linha do BED, e o painel_bed grava uma linha por gene
+  #    localizado;
+  #  - o frequencias só pula linha sem 6 campos, o que não ocorre na saída do bcftools query;
+  #  - o SnpEff conta toda linha não-'#' que ele devolve (anotacao_snpeff.py:64).
+  # Fica FORA "VEP = variantes com AF": é só empírico, e um invariante que reprova dado
+  # legítimo impede o relatório inteiro.
+  invariantes:
+    - {tipo: igual, a: extracao.extracao_resumo.n_regioes, b: painel_bed.painel_resumo.n_localizados}
+    - {tipo: soma, partes: [frequencias.frequencias_resumo.n_variantes_com_af, frequencias.frequencias_resumo.n_sem_af],
+       total: extracao.extracao_resumo.n_variantes_extraidas}
+    - {tipo: igual, a: snpeff.anotacao_resumo.n_variantes_anotadas, b: extracao.extracao_resumo.n_variantes_extraidas}
+
+# Selo do pipeline: preenchido só depois de um E2E real pelo n8n (não existe ainda receita de
+# hash de pipeline; selos.regravar grava por posição nos manifests e não toca aqui).
+selo_pipeline: {testado_em: "", hash: ""}

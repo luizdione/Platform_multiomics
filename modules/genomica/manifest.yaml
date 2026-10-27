@@ -111,8 +111,8 @@ scripts:
       --gtf /data/snpeff_data/ARS-UCD1.3.113/genes.gtf.gz
       --saida {dados}/results/genomica/paineis
     params:
-      - {name: painel, rotulo: "Arquivo do painel (símbolos, 1/linha)", default: "modules/genomica/data/paineis/termotolerancia.txt"}
-      - {name: pad, rotulo: "Flanco em pb (convenção painel 108: 15000)", default: "15000"}
+      - {name: painel, rotulo: "Arquivo do painel (símbolos, 1/linha)", default: "modules/genomica/data/paineis/termotolerancia.txt", tipo: caminho}
+      - {name: pad, rotulo: "Flanco em pb (convenção painel 108: 15000)", default: "15000", tipo: inteiro}
     inputs: ["modules/genomica/data/paineis/termotolerancia.txt", "E:\\data\\snpeff_data\\ARS-UCD1.3.113\\genes.gtf.gz"]
     outputs: ["results/genomica/paineis/termotolerancia.bed", "results/genomica/paineis/termotolerancia_resumo.json"]
     mem_gb: 1
@@ -126,7 +126,7 @@ scripts:
       python3 modules/genomica/scripts/integridade_vcf.py
       --dir {dir_vcf} --saida {dados}/results/genomica/integridade
     params:
-      - {name: dir_vcf, rotulo: "Diretório dos VCFs/BCFs", default: "/data/1000bg_vcf"}
+      - {name: dir_vcf, rotulo: "Diretório dos VCFs/BCFs", default: "/data/1000bg_vcf", tipo: dir}
     inputs: ["E:\\data\\1000bg_vcf"]
     outputs: ["results/genomica/integridade/integridade.tsv", "results/genomica/integridade/integridade_resumo.json"]
     mem_gb: 1
@@ -146,10 +146,10 @@ scripts:
       --grupo-a {grupo_a} --grupo-b {grupo_b}
       --saida {dados}/results/genomica/fst
     params:
-      - {name: vcf, rotulo: "VCF/BCF com genótipos", default: "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf"}
-      - {name: regiao, rotulo: "Região (crom:ini-fim)", default: "14:1-2500000"}
-      - {name: grupo_a, rotulo: "Grupo A (Nome=lista)", default: "Angus=/data/1000bg_metadata/samples_angus.txt"}
-      - {name: grupo_b, rotulo: "Grupo B (Nome=lista)", default: "Brahman=/data/1000bg_metadata/samples_brahman.txt"}
+      - {name: vcf, rotulo: "VCF/BCF com genótipos", default: "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf", tipo: caminho}
+      - {name: regiao, rotulo: "Região (crom:ini-fim)", default: "14:1-2500000", tipo: texto}
+      - {name: grupo_a, rotulo: "Grupo A (Nome=lista)", default: "Angus=/data/1000bg_metadata/samples_angus.txt", tipo: grupo}
+      - {name: grupo_b, rotulo: "Grupo B (Nome=lista)", default: "Brahman=/data/1000bg_metadata/samples_brahman.txt", tipo: grupo}
     inputs: ["E:\\data\\1000bg_vcf", "E:\\data\\1000bg_metadata\\samples_angus.txt", "E:\\data\\1000bg_metadata\\samples_brahman.txt"]
     outputs: ["results/genomica/fst/fst_top.tsv", "results/genomica/fst/fst_resumo.json"]
     mem_gb: 4
@@ -167,6 +167,110 @@ scripts:
       --saida {dados}/results/genomica/demo/vep
     inputs: ["results/genomica/demo/extracao/extraido.vcf.gz", "E:\\data\\omica\\refs\\vep\\bos_taurus"]
     outputs: ["results/genomica/demo/vep/vep_resumo.json", "results/genomica/demo/vep/efeitos_vep.tsv"]
+    mem_gb: 4
+    cpus: 1
+    tempo_estimado: "2–5 min"
+# Entradas ORQUESTRÁVEIS (pipelines/genomica_painel.yaml e genomica_regioes.yaml, n8n): os
+# MESMOS scripts de `scripts:` (nenhum editado), com entrada e saída por parâmetro e cada
+# porta tipada (omica/contrato/formatos.py). Esta seção não entra no hash dos selos
+# (registry.hash_dos_passos só lê `scripts:`) e não tem linha de selo: o selos.regravar
+# grava pela ORDEM das linhas de selo do arquivo.
+scripts_api:
+  - key: painel_bed
+    titulo: "Painel de genes → BED (GTF local, ARS-UCD1.3.113)"
+    descricao: Resolve os símbolos no GTF do banco SnpEff local e grava o BED com flanco.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/coordenadas_painel.py
+      --painel {painel} --pad {pad}
+      --gtf /data/snpeff_data/ARS-UCD1.3.113/genes.gtf.gz
+      --saida {saida}
+    params:
+      - {name: painel, rotulo: "Painel (símbolos, 1 por linha)", tipo: caminho}
+      - {name: pad, rotulo: "Flanco em pb", default: "15000", tipo: inteiro}
+    consome: {painel: painel_simbolos}
+    # o script nomeia as saídas pelo STEM da entrada (coordenadas_painel.py:69,77): a entrada
+    # do pipeline chama-se "painel" (cópia painel.txt → painel.bed); teste de acoplamento em
+    # tests/test_contrato.py
+    produz:
+      bed: {arquivo: painel.bed, formato: bed_regioes}
+      painel_resumo: {arquivo: painel_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~20 s"
+  - key: extracao
+    titulo: "Extração por regiões (bcftools view -R)"
+    descricao: Extrai do VCF.gz/BCF indexado as variantes das regiões do BED; grava VCF.gz + .tbi.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/extracao_regioes.py
+      --entrada {vcf} --bed {bed} --saida {saida}
+    params:
+      - {name: vcf, rotulo: "VCF.gz/BCF indexado", tipo: caminho}
+      - {name: bed, rotulo: "BED de regiões", tipo: caminho}
+    consome: {vcf: vcf_indexado, bed: bed_regioes}
+    produz:
+      vcf: {arquivo: extraido.vcf.gz, formato: vcf_indexado}
+      vcf_indice: {arquivo: extraido.vcf.gz.tbi, formato: indice_vcf}
+      extracao_resumo: {arquivo: extracao_resumo.json, formato: resumo_json}
+    # _comum.contar_variantes guarda o `bcftools view -H` inteiro (selado): o pico é ~2–3× a
+    # saída; com os 1.842 genótipos do Run 8, 4 GB cobrem ~180 mil variantes. mem_gb só
+    # reserva na guarda de RAM, não limita o processo
+    mem_gb: 4
+    cpus: 1
+    tempo_estimado: "~10 s (demo) a ~2 min (BCF genotipado)"
+  - key: frequencias
+    titulo: "Frequências alélicas (INFO/AF)"
+    descricao: Tabela AF/MAF ordenada por MAF; o alelo '*' não conta como alelo.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/frequencias.py
+      --entrada {vcf} --maf-corte {maf_corte} --saida {saida}
+    params:
+      - {name: vcf, rotulo: "VCF extraído", tipo: caminho}
+      - {name: maf_corte, rotulo: "Corte de MAF do resumo", default: "0.05", tipo: decimal}
+    consome: {vcf: vcf_indexado}
+    produz:
+      frequencias: {arquivo: frequencias.tsv, formato: tabela_frequencias}
+      frequencias_resumo: {arquivo: frequencias_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~10 s"
+  - key: snpeff
+    titulo: "Anotação SnpEff (ARS-UCD1.3.113)"
+    descricao: Anota com o banco custom local e conta o 1º efeito de cada variante (top 15).
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/genomica/scripts/anotacao_snpeff.py
+      --entrada {vcf} --db ARS-UCD1.3.113 --datadir /data/snpeff_data --xmx 4g
+      --saida {saida}
+    params:
+      - {name: vcf, rotulo: "VCF extraído", tipo: caminho}
+    consome: {vcf: vcf_indexado}
+    produz:
+      vcf_anotado: {arquivo: anotado.vcf.gz, formato: vcf_anotado_snpeff}
+      efeitos: {arquivo: efeitos.tsv, formato: contagem_efeitos_snpeff}
+      anotacao_resumo: {arquivo: anotacao_resumo.json, formato: resumo_json}
+    mem_gb: 5
+    cpus: 2
+    tempo_estimado: "1–3 min"
+  # Sem --cache/--especie: o default do vep_anotacao.py é o mesmo (/data/omica/refs/vep,
+  # bos_taurus), e o literal /data/omica/... fica sob {dados} — contornaria por texto a
+  # recusa de {dados} num scripts_api (registry._validar_referencias). Crítica F5 #10.
+  - key: vep
+    titulo: "Anotação VEP offline (cache 110, ARS-UCD1.2)"
+    descricao: Consequências por variante × transcrito com o cache bos_taurus 110 pinado.
+    runtime: "image:omica-vep"
+    cmd: >-
+      python3 modules/genomica/scripts/vep_anotacao.py
+      --entrada {vcf} --saida {saida}
+    params:
+      - {name: vcf, rotulo: "VCF extraído", tipo: caminho}
+    consome: {vcf: vcf_indexado}
+    produz:
+      vep_tabela: {arquivo: vep.tsv, formato: tabela_vep}
+      efeitos_vep: {arquivo: efeitos_vep.tsv, formato: contagem_consequencias_vep}
+      vep_resumo: {arquivo: vep_resumo.json, formato: resumo_json}
     mem_gb: 4
     cpus: 1
     tempo_estimado: "2–5 min"

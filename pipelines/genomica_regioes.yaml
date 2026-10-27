@@ -1,0 +1,69 @@
+# Pipeline orquestrável (n8n): regiões (BED do usuário) → variantes anotadas.
+#
+# Irmão do genomica_painel, sem o passo do GTF: o autor traz as regiões prontas. É o pipeline
+# da PARIDADE com o selo — o wf_painel_demo foi tirado com painel_demo.bed, não com um painel
+# de símbolos — e o único em que a checagem vcf_e_bed (BED × índice, antes de rodar) tem uso.
+#
+# A entrada "regioes" é copiada como regioes.bed: o bcftools -R só lê 0-based um arquivo cujo
+# nome termina em .bed (com outro nome, 1-based inclusivo: cada região desloca 1 pb). No modo
+# caminho, a regra de nome também roda sobre o nome da ORIGEM (formatos.regra_de_nome): um
+# '.txt' 1-based não vira '.bed' em silêncio.
+#
+# O VCF segue as regras do genomica_painel (caminho no servidor; cópia ou referência pela
+# raiz). Execução LINEAR: o executar de um passo exige o portão aprovado de todos os
+# anteriores — um SnpEff reprovado bloqueia o VEP.
+id: genomica_regioes
+modulo: genomica
+titulo: "Regiões (BED) → variantes anotadas (Run 8, ARS-UCD1.2)"
+descricao: >-
+  BED de regiões (0-based) e um VCF.gz/BCF indexado → variantes das regiões →
+  frequências alélicas (INFO/AF), efeitos SnpEff e consequências VEP.
+
+entradas:
+  regioes:
+    formato: bed_regioes
+    rotulo: "Regiões (.bed: contig, início 0-based, fim; separado por TAB)"
+    exemplo: modules/genomica/demo_data/painel_demo.bed
+  vcf:
+    formato: vcf_indexado
+    modos: [copia, referencia]
+    rotulo: >-
+      VCF.gz ou BCF indexado — caminho no servidor (modules/genomica/demo_data/…,
+      /data/omica/entradas/… ou /data/1000bg_vcf/…), com o .tbi/.csi ao lado
+    exemplo: modules/genomica/demo_data/demo_bta14_inicio.vcf.gz
+
+checagens_entrada:
+  - {tipo: vcf_tem_info_af, vcf: vcf}
+  - {tipo: vcf_contigs_ars_ucd, vcf: vcf}
+  # contig do BED ausente do VCF (chr14 × 14, MT × M) e BED inteiro sem registro pelo índice
+  - {tipo: vcf_e_bed, vcf: vcf, bed: regioes}
+
+passos:
+  - id: extracao
+    script: extracao
+    liga: {vcf: entrada.vcf, bed: entrada.regioes}
+  - id: frequencias
+    script: frequencias
+    liga: {vcf: extracao.vcf}
+    params: {maf_corte: "0.05"}
+  - id: snpeff
+    script: snpeff
+    liga: {vcf: extracao.vcf}
+  - id: vep
+    script: vep
+    liga: {vcf: extracao.vcf}
+
+relatorio:
+  figuras: []
+  resumos: [extracao.extracao_resumo, frequencias.frequencias_resumo, snpeff.anotacao_resumo, vep.vep_resumo]
+  tabelas:
+    # sem top.ordenar: o arquivo já vem em N decrescente (most_common)
+    - {passo: snpeff, porta: efeitos, chave: EFEITO, colunas: [N], top: {n: 10}}
+    - {passo: vep, porta: efeitos_vep, chave: CONSEQUENCIA, colunas: [N], top: {n: 10}}
+  # as mesmas do genomica_painel, menos a do painel (não há passo painel_bed)
+  invariantes:
+    - {tipo: soma, partes: [frequencias.frequencias_resumo.n_variantes_com_af, frequencias.frequencias_resumo.n_sem_af],
+       total: extracao.extracao_resumo.n_variantes_extraidas}
+    - {tipo: igual, a: snpeff.anotacao_resumo.n_variantes_anotadas, b: extracao.extracao_resumo.n_variantes_extraidas}
+
+selo_pipeline: {testado_em: "", hash: ""}

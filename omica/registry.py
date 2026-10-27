@@ -9,6 +9,8 @@ doctor e em /saude. Nunca módulo morto silencioso.
 """
 from __future__ import annotations
 
+import re
+import string
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -30,6 +32,41 @@ STATUS_TYPES = {
 }
 
 RUNTIMES_VALIDOS = ("image:", "conda:", "profile:")
+
+# Campo de format aceito num cmd: um nome simples, cru. Sem índice (`{dados[0]}`), sem
+# atributo (`{dados.x}`) e sem posição (`{}`, `{0}`) — o dispatch formata só por nome.
+_CAMPO_SIMPLES = re.compile(r"[A-Za-z_][A-Za-z0-9_]*", re.ASCII)
+
+
+def campos_do_cmd(cmd: str) -> tuple[set[str], list[str]]:
+    """(nomes, problemas) dos campos que o `str.format` do dispatch substitui no cmd.
+
+    Os nomes saem de `string.Formatter().parse`, o MESMO parser do `str.format`. As travas
+    de {dados}/{saida} comparavam o TEXTO literal "{dados}" (revisão F2, resíduo do achado
+    #37): `{dados!s}` e `{dados:}` escapavam e o caminho fixo gravava no demo selado, e
+    `{{dados}}` (chave escapada, que vira texto) era tomado por campo.
+
+    Problema = campo com conversão (`!s`, `!r`, `!a`) ou especificador (`:...`), campo que
+    não é nome simples, ou chave malformada. Nenhum manifest precisa disso, e cada um é uma
+    forma de um nome passar por outro numa comparação de texto. (`{dados:}`, especificador
+    vazio, é idêntico a `{dados}` para o parser — e sai com o nome `dados`, como deve.)"""
+    nomes: set[str] = set()
+    problemas: list[str] = []
+    try:
+        partes = list(string.Formatter().parse(cmd))
+    except ValueError as e:
+        return nomes, [f"chaves malformadas no cmd ({e})"]
+    for _, nome, especificador, conversao in partes:
+        if nome is None:
+            continue  # trecho literal (inclui `{{`/`}}` escapadas)
+        if not _CAMPO_SIMPLES.fullmatch(nome):
+            problemas.append(f"campo {{{nome}}} não é um nome simples")
+            continue
+        nomes.add(nome)
+        if conversao is not None or especificador:
+            problemas.append(f"campo {nome!r} com conversão/especificador "
+                             f"({'!' + conversao if conversao else ''}{':' + especificador if especificador else ''})")
+    return nomes, problemas
 
 
 class Etapa(BaseModel):
@@ -68,6 +105,11 @@ class ScriptSpec(BaseModel):
     mem_gb: float = 1.0     # insumo da guarda de RAM
     cpus: int = 1
     tempo_estimado: str = ""
+    # Contrato tipado de passagem (só nas entradas de `scripts_api`, F2 da integração com o
+    # n8n): que formato cada parâmetro consome e que portas o script produz em {saida}.
+    # É o que deixa omica/pipelines.py RECUSAR um encadeamento cujo formato não bate.
+    consome: dict[str, str] = Field(default_factory=dict)
+    produz: dict[str, "PortaSpec"] = Field(default_factory=dict)
 
     @field_validator("runtime")
     @classmethod
@@ -75,6 +117,13 @@ class ScriptSpec(BaseModel):
         if not v.startswith(RUNTIMES_VALIDOS):
             raise ValueError(f"runtime deve começar com um de {RUNTIMES_VALIDOS}: {v!r}")
         return v
+
+
+class PortaSpec(BaseModel):
+    """Uma saída de um script de `scripts_api`: o arquivo (relativo a {saida}) e o formato
+    que omica/contrato/formatos.py sabe validar."""
+    arquivo: str
+    formato: str
 
 
 class ParamSpec(BaseModel):
@@ -122,6 +171,11 @@ class Manifest(BaseModel):
     skills_dominios: list[str] = Field(default_factory=list)
     fases: list[Fase] = Field(default_factory=list)
     scripts: list[ScriptSpec] = Field(default_factory=list)
+    # Entradas ORQUESTRÁVEIS (n8n): os mesmos arquivos de script, mas com entrada e saída
+    # como parâmetro (`--saida {saida}` = pasta do run). Seção separada de propósito: UI,
+    # Professor, plugin Bioinfo e o hash dos selos leem só `scripts:` — nada aqui vence selo
+    # nem muda o que a UI mostra.
+    scripts_api: list[ScriptSpec] = Field(default_factory=list)
     workflows: list[WorkflowSpec] = Field(default_factory=list)
     # página → arquivo de resultado (relativo a results_dir). Único caminho para
     # números na UI (anti-lição nº 4: nada de número científico hardcoded).
@@ -180,12 +234,34 @@ def _validar_referencias(m: Manifest, modules_dir: Path = MODULES_DIR) -> None:
         for etapa in fase.etapas:
             if etapa.script and not (base_modulo / "scripts" / etapa.script).exists():
                 faltando.append(f"etapa {etapa.key} → scripts/{etapa.script}")
-    for spec in m.scripts:
+    for spec in [*m.scripts, *m.scripts_api]:
         alvo = next((t for t in spec.cmd.split() if t.endswith((".py", ".R", ".sh"))), None)
         if alvo is None:
             faltando.append(f"script {spec.key} → cmd sem arquivo executável: {spec.cmd!r}")
         elif not (raiz / alvo).exists():
             faltando.append(f"script {spec.key} → {alvo}")
+        faltando.extend(f"script {spec.key}: {p}" for p in campos_do_cmd(spec.cmd)[1])
+    # chave única nas duas seções: a API resolve `scripts_api` pela chave, e uma chave
+    # igual a uma de `scripts` faria a UI e a API rodarem coisas diferentes com o mesmo nome
+    chaves = [s.key for s in m.scripts] + [s.key for s in m.scripts_api]
+    repetidas = sorted({k for k in chaves if chaves.count(k) > 1})
+    if repetidas:
+        faltando.append(f"chave de script repetida entre scripts/scripts_api: {repetidas}")
+    for spec in m.scripts_api:
+        nomes = {p.name for p in spec.params}
+        for param in spec.consome:
+            if param not in nomes:
+                faltando.append(f"scripts_api {spec.key}: consome {param!r} que não é parâmetro")
+        # pelos NOMES dos campos (campos_do_cmd), não pelo texto: `{dados!s}` é {dados}
+        nomes_cmd = campos_do_cmd(spec.cmd)[0]
+        if "saida" not in nomes_cmd:
+            faltando.append(f"scripts_api {spec.key}: cmd sem {{saida}} (gravaria fora da pasta do run)")
+        if "dados" in nomes_cmd:
+            # Meia-edição de um cmd copiado de `scripts:` — `--saida {dados}/results/<mod>/demo/x
+            # --log {saida}` — passava na checagem acima. Num scripts_api a entrada vem por
+            # parâmetro e a saída por {saida}; caminho fixo sob {dados} fica fora do plano
+            # congelado e pode ser o demo selado (revisão F2, achado #37).
+            faltando.append(f"scripts_api {spec.key}: cmd cita {{dados}} (caminho fixo fora do plano do run)")
     if faltando:
         raise ValueError("referências quebradas: " + "; ".join(faltando))
     _validar_workflows(m)
