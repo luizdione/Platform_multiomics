@@ -1,0 +1,43 @@
+# projetos/bos_taurus/demo — o subprojeto dos SELOS (v2 multiespécie, M0; ESPEC §4 D1).
+#
+# São as demos atuais dos 4 módulos, com a raiz legada results/<mod>/demo. É o ÚNICO lugar em
+# que `scripts:` e os workflows selados executam (fora daqui, só pipelines) e só existe no
+# repositório (o loader recusa uma cópia em <dados>).
+# `parametros: {}` de propósito: é o que mantém o cmd byte a byte igual ao da v1 (golden
+# tests/golden/cmd_demo_v1.json). O amostras.tsv é GERADO dos arquivos do repositório
+# (`python tests/test_m0_dados.py --gerar`), nunca digitado.
+#
+# ATENÇÃO (crítica v2, médio 13): o contexto_sha256 dos runs cobre o CONTEÚDO deste arquivo
+# (qualquer campo, inclusive pergunta, avisos e validade; comentários não) e os bytes do
+# amostras.tsv e do painel (CRLF × LF não conta). Mudar um deles derruba com 409 `contexto_mudou` os runs
+# do demo aprovados e ainda não executados (os do n8n caem aqui). Edite com a fila de runs vazia.
+id: bos_taurus/demo
+especie: bos_taurus
+assembly: ARS-UCD1.3
+titulo: "Demonstração (dados que sustentam os selos)"
+pergunta: "Os workflows da plataforma reproduzem, de ponta a ponta, os resultados selados das demos?"
+tipo: demo
+status: valido
+# crítica v2, médio 12: selo é reprodutibilidade do CÓDIGO, não validade científica
+validade: "selos 5/5 em 2026-10-27: atestam que o código reproduz as demos, não validade científica; na epigenômica, a interseção, o perfil TSS e o MOFA usam o painel 108 v1, com 13 loci errados (ver avisos)"
+proveniencia_rotulos: "rotulos_corrigidos_2026-10-13.tsv (genetic_pole): Fst/ML Angus 102 × Brahman 55"
+avisos:
+  - "epigenômica: painel_108 v1 (.json e .bed) tem 13 loci errados (ISSUES.md:84-88); a interseção, o perfil TSS e o MOFA do demo usam essa versão; corrigir só no reselo (M6)"
+amostras: amostras.tsv
+datasets:
+  GSE235171: modules/transcriptomica/demo_data/counts_granulosa.tsv
+  zenodo_cd4: modules/epigenomica/demo_data
+  bta14_demo: modules/genomica/demo_data/demo_bta14_inicio.vcf.gz
+  run8_1000bg: /data/1000bg_vcf
+modulos: [genomica, epigenomica, transcriptomica, ml]
+pipelines: [transcriptomica_de, genomica_painel, genomica_regioes]
+parametros: {}                       # vazio DE PROPÓSITO: é o que mantém o cmd byte a byte
+dados_legados:
+  - /data/omica/results/genomica/demo
+  - /data/omica/results/genomica/fst
+  - /data/omica/results/genomica/paineis
+  - /data/omica/results/genomica/integridade
+  - /data/omica/results/epigenomica/demo
+  - /data/omica/results/transcriptomica/demo
+  - /data/omica/results/ml/demo
+privado: false

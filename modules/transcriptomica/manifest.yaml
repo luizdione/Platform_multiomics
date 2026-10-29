@@ -143,6 +143,7 @@ scripts_api:
     titulo: "Expressão diferencial (DESeq2)"
     descricao: Contraste entre duas condições de uma matriz de contagens genes × amostras.
     runtime: "image:omica-methyl"
+    especies: [bos_taurus, homo_sapiens, mus_musculus]
     cmd: >-
       Rscript modules/transcriptomica/scripts/expressao_deseq2.R
       --counts {counts} --coldata {coldata}
@@ -169,6 +170,7 @@ scripts_api:
     titulo: "Volcano plot (DESeq2)"
     descricao: Volcano da tabela DE, rotulado com o contraste que o DESeq2 calculou, com destaques dos genes mais significativos.
     runtime: "image:omica-methyl"
+    especies: [bos_taurus, homo_sapiens, mus_musculus]
     cmd: >-
       python3 modules/transcriptomica/scripts/volcano_api.py
       --de {de} --resumo {resumo} --padj {padj} --lfc {lfc}

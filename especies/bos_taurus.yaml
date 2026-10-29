@@ -1,0 +1,57 @@
+# especies/bos_taurus.yaml — a espécie dos SELOS (v2 multiespécie, M0; ESPEC §4 D1).
+#
+# Bovinos são UMA espécie com uma assembly de trabalho (ARS-UCD): taurino × zebuíno, Angus ×
+# Brahman, Nelore × Holstein são RAÇA, metadado da amostra (amostras.tsv do subprojeto).
+#
+# `refs` são os LITERAIS que os scripts selados usam hoje (default de cada script e cmd do
+# golden tests/golden/cmd_demo_v1.json; tests/test_m0_dados.py confere um por um). Trocar um
+# valor muda o cmd de bos_taurus/demo, que tem de sair byte a byte igual ao da v1.
+# O estado (pronta | parcial | sem_referencia) é CALCULADO por stat no disco, nunca declarado
+# aqui; caminhos só como /data/... (no host, GENOME_DATA = E:\data; no container, /data).
+#
+# ATENÇÃO (crítica v2, médio 13): o contexto_sha256 de cada run cobre SÓ o que a execução usa
+# desta espécie (omica/contexto.py, _sha_especie): da assembly do subprojeto, refs,
+# equivalências, contigs, prefixo_gene e fonte; e mais `modulos` e `parametros`. Mudar um deles
+# derruba com 409 `contexto_mudou` todo run bovino aprovado e ainda não executado, inclusive os
+# do n8n, que caem no demo; criar ou alterar refs/<esp>/<asm>/MANIFEST.json também. Comentários,
+# nomes de exibição, recursos e outra assembly NÃO derrubam. Mude esses campos com a fila de
+# runs vazia e registre no CHANGELOG.
+id: bos_taurus
+nome_cientifico: "Bos taurus / Bos indicus"
+nome_exibido: "Bovinos (Bos taurus / Bos indicus)"
+nome_exibido_en: "Cattle (Bos taurus / Bos indicus)"
+taxon_ids: [9913, 9915]
+ordem: 3
+assembly_padrao: ARS-UCD1.3          # decisão D-1 (§13): GTF local "#!genome-build ARS-UCD1.3", GCA_002263795.3
+assemblies:
+  ARS-UCD1.3:
+    fonte: "Ensembl 113 (GTF local = snpeff_data/ARS-UCD1.3.113, md5 9d012e09…); SnpEff ARS-UCD1.3.113"
+    contigs: sem_chr
+    prefixo_gene: ENSBTAG
+    refs:
+      fasta: /data/snpeff_data/ARS-UCD1.3.113/sequences.fa        # motifs_homer.py --genoma; o preparse HOMER depende deste nome-base
+      gtf: /data/snpeff_data/ARS-UCD1.3.113/genes.gtf.gz          # coordenadas_painel.py --gtf (genomica/manifest.yaml:111,186)
+      cdna: /data/rnaseq/nfcore_output/sub03/genome/genome.transcripts.fa   # salmon_quant.py TRANSCRITOS_LEGADO
+      salmon_indice: /data/omica/refs/salmon_bostau                # salmon_quant.py --indice
+      homer_preparsed: /data/omica/refs/homer_preparsed            # motifs_homer.py --preparsed
+      snpeff_db: "ARS-UCD1.3.113"                                  # anotacao_snpeff.py --db
+      snpeff_datadir: /data/snpeff_data                            # anotacao_snpeff.py --datadir
+      vep_cache: /data/omica/refs/vep                              # vep_anotacao.py --cache
+      vep_cache_version: "110"                                     # vep_anotacao.py (literal); string: refs é dict[str,str]
+      plink_chr_set: "29"                                          # fst_racas.py --chr-set (literal)
+    equivalencias:
+      # cache VEP release 110 = ARS-UCD1.2 (refs/vep/bos_taurus/110_ARS-UCD1.2); só os
+      # comprimentos dos autossomos foram conferidos contra o ARS-UCD1.3
+      vep_cache: {assembly: ARS-UCD1.2, relacao: equivalente_autossomos}
+recursos:
+  vcf_populacional: /data/1000bg_vcf                  # Run 8, ARS-UCD1.2, contigs sem "chr" (:ro no compose)
+  rotulos_raca: /data/1000bg_metadata/proveniencia_2026-10-13/rotulos_corrigidos_2026-10-13.tsv   # coluna genetic_pole
+  painel_108_canonico: /data/genes_alvo/painel108_auditoria_definitiva_2026-10-20/painel_coordenadas_auditadas.tsv
+  fasta_toplevel: /data/genome_reference/ARS-UCD1.3/Bos_taurus.ARS-UCD1.3.dna.toplevel.fa
+nunca_usar:
+  # rótulos de raça antigos ou arquivados como inválidos; a fonte vigente é `rotulos_raca` acima
+  - /data/1000bg_vcf/amostras_racas.csv
+  - /data/1000bg_metadata/_ARQUIVO_INVALIDOS_rotulos_SAMN_2026-04-28
+  - /data/omica/results/_ARQUIVO_INVALIDOS_rotulos_2026-10-19
+modulos: [genomica, epigenomica, transcriptomica, ml]
+parametros: {}                       # vazio DE PROPÓSITO: os defaults bovinos dos scripts valem

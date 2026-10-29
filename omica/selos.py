@@ -17,6 +17,7 @@ Uso:
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import yaml
@@ -80,17 +81,48 @@ def regravar(modules_dir: Path = MODULES_DIR) -> int:
     return trocados
 
 
-def main(gravar: bool = False) -> int:
+def erros_de_carga(modules_dir: Path = MODULES_DIR) -> dict[str, str]:
+    """pasta → mensagem de todo manifest que NÃO carregou.
+
+    `conferir` e `regravar` iteram só os módulos válidos: um manifest recusado no load (chave
+    desconhecida, placeholder órfão...) sumia da conferência, e `selos` dizia "válidos" com
+    um módulo inteiro fora — inclusive o selo dele (achado lateral 1 da v2)."""
+    return dict(load_registry(modules_dir).erros)
+
+
+def _stdout_tolerante() -> None:
+    """No host Windows o stdout é cp1252 e o print de "✅"/"❌" levantava UnicodeEncodeError:
+    `python -m omica selos` saía com 1 com os 5 selos válidos (crítica v2, bloqueante 3). O
+    caractere fora da codificação vira escape (\\u2705) em vez de derrubar a conferência."""
+    reconfigurar = getattr(sys.stdout, "reconfigure", None)
+    if reconfigurar is None:
+        return
+    try:
+        reconfigurar(errors="backslashreplace")
+    except (ValueError, OSError):  # stream sem suporte (fechado, não-texto): segue como está
+        pass
+
+
+def main(gravar: bool = False, modules_dir: Path = MODULES_DIR) -> int:
+    _stdout_tolerante()
+    erros = erros_de_carga(modules_dir)
+    if erros:
+        for pasta, msg in sorted(erros.items()):
+            print(f"❌ manifest inválido {pasta}: {msg}")
+        if gravar:
+            print("\nnada foi regravado: corrija os manifests inválidos antes de recarimbar.")
+        return 1
+
     if gravar:
         print("Regravando hash_scripts com o estado ATUAL dos scripts.")
         print("ATENÇÃO: o selo afirma que o workflow rodou de ponta a ponta. Só")
         print("recarimbe DEPOIS de re-executar de verdade — senão você está")
         print("apenas silenciando o aviso.\n")
-        n = regravar()
+        n = regravar(modules_dir)
         print(f"\n{n} selo(s) recarimbado(s).")
         return 0
 
-    estado = conferir()
+    estado = conferir(modules_dir)
     if not estado:
         print("Nenhum workflow selado.")
         return 0

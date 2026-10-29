@@ -1,0 +1,29 @@
+# projetos/bos_taurus/aula_granulosa_calor — subprojeto de AULA (v2 multiespécie, M0;
+# ESPEC §4 D1, decisão D-2). Dados públicos (GSE235171, a mesma matriz do demo): é o alvo do
+# E2E "fora do demo" sem gravar nada em E:\data. Fora de bos_taurus/demo só PIPELINES
+# executam; aqui, o transcriptomica_de, com saída em results/projetos/bos_taurus/<slug>/.
+# O amostras.tsv é GERADO do coldata do demo (`python tests/test_m0_dados.py --gerar`), nunca
+# digitado; as colunas amostra/condicao são as do coldata, então ele também serve de coldata.
+#
+# ATENÇÃO (crítica v2, médio 13): o contexto_sha256 dos runs cobre o CONTEÚDO deste arquivo
+# (qualquer campo, inclusive pergunta, avisos e validade; comentários não) e os bytes do
+# amostras.tsv e do painel (CRLF × LF não conta). Mudar um deles derruba com 409 `contexto_mudou` os runs
+# desta aula aprovados e ainda não executados (o E2E-5 usa isso de propósito).
+id: bos_taurus/aula_granulosa_calor
+especie: bos_taurus
+assembly: ARS-UCD1.3
+titulo: "Aula — estresse térmico na granulosa (Angus, verão × inverno)"
+pergunta: "Quais genes da célula da granulosa de vacas Angus mudam de expressão no verão quente em relação ao inverno (4 × 4 amostras públicas, GSE235171)?"
+tipo: aula
+status: valido
+validade: "dados públicos GSE235171 (mesma matriz do demo)"
+proveniencia_rotulos: "amostra e condicao copiadas de modules/transcriptomica/demo_data/coldata_granulosa.tsv; raça, tecido e acesso SRR lidos do nome da amostra"
+amostras: amostras.tsv
+datasets:
+  GSE235171: modules/transcriptomica/demo_data/counts_granulosa.tsv
+contrastes:
+  - {id: verao_vs_inverno, coluna: condicao, a: summer_heat, b: winter_control}
+modulos: [transcriptomica]
+pipelines: [transcriptomica_de]
+parametros: {}
+privado: false

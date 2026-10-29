@@ -10,6 +10,7 @@
 # arbitrários) e sempre antes da aprovação do plano.
 id: transcriptomica_de
 modulo: transcriptomica
+especies: [bos_taurus, homo_sapiens, mus_musculus]
 titulo: "Expressão diferencial (DESeq2) + volcano"
 descricao: >-
   Matriz de contagens genes × amostras e tabela de amostras com a condição de cada uma →

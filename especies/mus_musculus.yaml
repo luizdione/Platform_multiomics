@@ -1,0 +1,24 @@
+# especies/mus_musculus.yaml — v2 multiespécie (M0; ESPEC §4 D1).
+#
+# NENHUMA referência genômica local nesta etapa (decisão do autor: nada murino é baixado).
+# `plink_chr_set` não é arquivo: o estado calculado continua `sem_referencia`.
+# `nao_referencia`: /data/proteome_murine é o proteoma UniProt/STRING/BioGRID do bonder (PPI),
+# que existe no disco (conferido por stat em 2026-10-28) mas não serve a nenhum dos 4 módulos.
+id: mus_musculus
+nome_cientifico: "Mus musculus"
+nome_exibido: "Camundongo (Mus musculus)"
+nome_exibido_en: "Mouse (Mus musculus)"
+taxon_ids: [10090]
+ordem: 2
+assembly_padrao: GRCm39
+assemblies:
+  GRCm39:
+    fonte: "Ensembl 113 (não baixado)"
+    contigs: sem_chr
+    prefixo_gene: ENSMUSG
+    refs:
+      plink_chr_set: "19"            # 19 autossomos (fst_racas.py --chr-set é classe B: M2)
+nao_referencia:
+  - /data/proteome_murine
+modulos: [transcriptomica]
+parametros: {}

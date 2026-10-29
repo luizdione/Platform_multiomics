@@ -1,0 +1,26 @@
+# especies/homo_sapiens.yaml — v2 multiespécie (M0; ESPEC §4 D1).
+#
+# NENHUMA referência local nesta etapa (decisão do autor: nada humano é baixado). Sem refs de
+# arquivo o estado calculado é `sem_referencia`; a espécie aparece na 1ª página assim mesmo e,
+# fora de bos_taurus/demo, só PIPELINES executam (transcriptomica_de sobre matriz pronta).
+# `nao_referencia`: existe no disco (conferido por stat em 2026-10-28), mas NÃO é referência e
+# não habilita módulo — anotação UCSC hg19 (contigs "chr3", outra assembly) e o mapa
+# XLOC→símbolo da colaboração NS5A.
+id: homo_sapiens
+nome_cientifico: "Homo sapiens"
+nome_exibido: "Humano (Homo sapiens)"
+nome_exibido_en: "Human (Homo sapiens)"
+taxon_ids: [9606]
+ordem: 1
+assembly_padrao: GRCh38
+assemblies:
+  GRCh38:
+    fonte: "Ensembl 113 (não baixado)"
+    contigs: sem_chr
+    prefixo_gene: ENSG
+    refs: {}
+nao_referencia:
+  - /data/genome_reference/hg19/refGene_hg19.txt.gz
+  - /data/genome_reference/hg19/mapa_GSE102910_simbolos.csv
+modulos: [transcriptomica]
+parametros: {}

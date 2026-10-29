@@ -15,8 +15,11 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omica.chaves_contexto import (CHAVES_CONTEXTO, ESPECIE_LEGADA, ID_DEMO, ID_ESPECIE,
+                                   ID_SUBPROJETO, MODULOS_RESERVADOS, RESERVADOS,
+                                   eh_chave_contexto)
 from omica.config import REPO_ROOT
 
 MODULES_DIR = REPO_ROOT / "modules"
@@ -32,6 +35,11 @@ STATUS_TYPES = {
 }
 
 RUNTIMES_VALIDOS = ("image:", "conda:", "profile:")
+
+# Toda classe lida de YAML recusa chave desconhecida (v2 multiespécie, M0): um `parms:` ou
+# um `requer_ref:` digitados errado eram descartados em silêncio pelo pydantic, e o script
+# rodava sem o que o autor achava ter declarado. `Registry` não é lido de YAML e não muda.
+_FORBID = ConfigDict(extra="forbid")
 
 # Campo de format aceito num cmd: um nome simples, cru. Sem índice (`{dados[0]}`), sem
 # atributo (`{dados.x}`) e sem posição (`{}`, `{0}`) — o dispatch formata só por nome.
@@ -70,6 +78,7 @@ def campos_do_cmd(cmd: str) -> tuple[set[str], list[str]]:
 
 
 class Etapa(BaseModel):
+    model_config = _FORBID
     key: str
     desc: str
     auto: bool = False
@@ -85,6 +94,7 @@ class Etapa(BaseModel):
 
 
 class Fase(BaseModel):
+    model_config = _FORBID
     id: str
     nome: str
     descricao: str = ""
@@ -94,6 +104,7 @@ class Fase(BaseModel):
 
 class ScriptSpec(BaseModel):
     """Evolução do SCRIPTS_META da genomes_platform: metadados + runtime + custo."""
+    model_config = _FORBID
     key: str
     titulo: str
     descricao: str = ""
@@ -110,6 +121,12 @@ class ScriptSpec(BaseModel):
     # É o que deixa omica/pipelines.py RECUSAR um encadeamento cujo formato não bate.
     consome: dict[str, str] = Field(default_factory=dict)
     produz: dict[str, "PortaSpec"] = Field(default_factory=dict)
+    # v2 multiespécie (M0) — FORA do hash dos selos (hash_dos_passos lê só o cmd, name=default
+    # e os bytes do script). `especies`: em que espécies o SCRIPT roda (por script, não por
+    # módulo); o default é o que todo script é hoje. `requer_refs`: os placeholders de
+    # contexto (CHAVES_CONTEXTO) que o cmd cita; o load recusa um sem o outro.
+    especies: list[str] = Field(default_factory=lambda: [ESPECIE_LEGADA])
+    requer_refs: list[str] = Field(default_factory=list)
 
     @field_validator("runtime")
     @classmethod
@@ -122,6 +139,7 @@ class ScriptSpec(BaseModel):
 class PortaSpec(BaseModel):
     """Uma saída de um script de `scripts_api`: o arquivo (relativo a {saida}) e o formato
     que omica/contrato/formatos.py sabe validar."""
+    model_config = _FORBID
     arquivo: str
     formato: str
 
@@ -129,6 +147,7 @@ class PortaSpec(BaseModel):
 class ParamSpec(BaseModel):
     """Parâmetro editável de um script na UI. O valor preenche o placeholder
     {name} do cmd (sanitizado no dispatch — nunca shell livre)."""
+    model_config = _FORBID
     name: str
     rotulo: str
     default: str = ""
@@ -136,6 +155,10 @@ class ParamSpec(BaseModel):
     # no hash do selo — hash_dos_passos só lê name=default —, então declarar o tipo num
     # script selado não vence o selo.
     tipo: Literal["texto", "caminho", "dir", "inteiro", "decimal", "grupo"] = "texto"
+    # v2 (fora do hash): de onde o DEFAULT vale. "especie" = o default é bovino e não vale
+    # fora de bos_taurus; "subprojeto" = é do demo e não vale fora de bos_taurus/demo. Nos
+    # dois casos o valor tem de vir do envio ou do contexto (quem aplica é o dispatch).
+    escopo: Literal["livre", "especie", "subprojeto"] = "livre"
 
 
 class WorkflowSpec(BaseModel):
@@ -143,6 +166,7 @@ class WorkflowSpec(BaseModel):
     input do seguinte. `testado_em`/`testado_por` só são preenchidos quando o
     encadeamento rodou de ponta a ponta de verdade — é o selo da aba do
     Professor Ômico (nunca marcar workflow não validado)."""
+    model_config = _FORBID
     id: str
     titulo: str
     descricao: str = ""
@@ -154,9 +178,14 @@ class WorkflowSpec(BaseModel):
     # Preenchida por `python -m omica selos --gravar` DEPOIS de um E2E real.
     hash_scripts: str = ""
     nota_didatica: str = ""
+    # v2 (fora do hash): subprojetos (<especie>/<slug>) em que o workflow PODE executar. Não
+    # é rótulo: os passos de `scripts:` gravam em caminho fixo do demo selado, e fora destes
+    # subprojetos o dispatch recusa (só pipelines executam fora do demo).
+    validado_em: list[str] = Field(default_factory=lambda: [ID_DEMO])
 
 
 class Manifest(BaseModel):
+    model_config = _FORBID
     id: str
     nome_pt: str
     nome_en: str
@@ -262,9 +291,53 @@ def _validar_referencias(m: Manifest, modules_dir: Path = MODULES_DIR) -> None:
             # parâmetro e a saída por {saida}; caminho fixo sob {dados} fica fora do plano
             # congelado e pode ser o demo selado (revisão F2, achado #37).
             faltando.append(f"scripts_api {spec.key}: cmd cita {{dados}} (caminho fixo fora do plano do run)")
+    faltando.extend(_validar_contexto(m))
     if faltando:
         raise ValueError("referências quebradas: " + "; ".join(faltando))
     _validar_workflows(m)
+
+
+def _validar_contexto(m: Manifest) -> list[str]:
+    """Regras da v2 multiespécie (M0) sobre módulo, parâmetros, placeholders e campos novos.
+
+    Sempre pelos NOMES dos campos (`campos_do_cmd`, o parser do próprio str.format), nunca
+    pelo texto do cmd: `{{ref_gtf}}` escapado é texto e não conta; `{ref_gtf!s}` já é
+    recusado como problema de formato por `_validar_referencias`."""
+    faltando: list[str] = []
+    if m.id in MODULOS_RESERVADOS:
+        # results/projetos/<esp>/<slug>/ é a árvore dos subprojetos
+        faltando.append(f"id de módulo reservado: {m.id!r}")
+    for spec in [*m.scripts, *m.scripts_api]:
+        rotulo = f"script {spec.key}"
+        params = {p.name for p in spec.params}
+        for nome in sorted(params):
+            if nome in RESERVADOS or eh_chave_contexto(nome):
+                # {dados}/{saida} e o contexto são preenchidos pelo SERVIDOR: um parâmetro com
+                # esse nome deixaria o cliente escolher a pasta de saída ou a referência
+                faltando.append(f"{rotulo}: parâmetro {nome!r} usa nome reservado ao servidor")
+        nomes_cmd = campos_do_cmd(spec.cmd)[0]
+        ctx_cmd = {c for c in nomes_cmd if eh_chave_contexto(c)}
+        fora = sorted(ctx_cmd - set(CHAVES_CONTEXTO))
+        if fora:
+            faltando.append(f"{rotulo}: placeholder de contexto fora da lista fechada {fora}")
+        nao_declarados = sorted((ctx_cmd & set(CHAVES_CONTEXTO)) - set(spec.requer_refs))
+        if nao_declarados:
+            faltando.append(f"{rotulo}: cmd usa {nao_declarados} sem declarar em requer_refs")
+        req_fora = sorted(set(spec.requer_refs) - set(CHAVES_CONTEXTO))
+        if req_fora:
+            faltando.append(f"{rotulo}: requer_refs fora de CHAVES_CONTEXTO {req_fora}")
+        orfaos = sorted(nomes_cmd - RESERVADOS - params - ctx_cmd)
+        if orfaos:
+            # antes só estourava como KeyError no str.format, já dentro de um run aprovado
+            faltando.append(f"{rotulo}: placeholder sem parâmetro {orfaos}")
+        especies_fora = [e for e in spec.especies if not (isinstance(e, str) and ID_ESPECIE.fullmatch(e))]
+        if not spec.especies or especies_fora:
+            faltando.append(f"{rotulo}: especies vazio ou fora do padrão {spec.especies!r}")
+    for wf in m.workflows:
+        fora_wf = [s for s in wf.validado_em if not (isinstance(s, str) and ID_SUBPROJETO.fullmatch(s))]
+        if fora_wf:
+            faltando.append(f"workflow {wf.id}: validado_em fora do padrão <especie>/<slug> {fora_wf!r}")
+    return faltando
 
 
 def hash_dos_passos(m: Manifest, wf: WorkflowSpec, modules_dir: Path = MODULES_DIR) -> str:

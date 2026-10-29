@@ -43,6 +43,11 @@ _DEFAULTS = {
     # run lê SEM copiar. Lista separada por vírgula; "-" desliga todas. Cada raiz precisa de um
     # bind SOMENTE LEITURA equivalente no docker-compose.yml (hoje: 1000bg_vcf).
     "OMICA_RAIZES_REFERENCIA": "1000bg_vcf",
+    # v2 multiespécie (decisão D-11): criar rascunho de subprojeto pela UI GRAVA em
+    # <OMICA_DATA>/projetos. Desligado por padrão; só "1/true/sim/yes" liga. Desligado, nada
+    # cria essa pasta (ensure_dirs não a cria) e omica.subprojetos.criar_rascunho recusa antes
+    # de qualquer E/S.
+    "OMICA_PERMITIR_RASCUNHO": "0",
 }
 
 
@@ -82,6 +87,8 @@ class Config:
     in_docker: bool = field(default_factory=lambda: bool(os.environ.get("OMICA_IN_DOCKER")))
     # no FIM e com default: quem monta Config à mão (testes) não precisa conhecer o campo
     raizes_referencia: tuple[str, ...] = field(default=("1000bg_vcf",))
+    # idem: no FIM e com default (D-11; testes montam Config à mão)
+    permitir_rascunho: bool = False
 
     @property
     def raw_dir(self) -> Path:
@@ -102,6 +109,12 @@ class Config:
     @property
     def jobs_dir(self) -> Path:
         return self.work_dir / "jobs"
+
+    @property
+    def projetos_dir(self) -> Path:
+        """Subprojetos fora do repositório (rascunhos e privados). Fora do ensure_dirs de
+        propósito: com OMICA_PERMITIR_RASCUNHO=0 a pasta nunca é criada."""
+        return self.data_dir / "projetos"
 
     def ensure_dirs(self) -> None:
         for d in (self.raw_dir, self.refs_dir, self.results_dir, self.work_dir, self.jobs_dir):
@@ -125,6 +138,7 @@ def get_config() -> Config:
         plugin_dir=Path(plugin) if (plugin := _obter("BIOINFO_PLUGIN_DIR", dotenv)) else None,
         gpu_switch=Path(_obter("OMICA_GPU_SWITCH", dotenv)),
         raizes_referencia=_lista_raizes(_obter("OMICA_RAIZES_REFERENCIA", dotenv)),
+        permitir_rascunho=_obter("OMICA_PERMITIR_RASCUNHO", dotenv).strip().lower() in ("1", "true", "sim", "yes"),
     )
 
 

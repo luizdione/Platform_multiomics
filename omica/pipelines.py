@@ -44,11 +44,12 @@ from typing import Literal, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from omica.chaves_contexto import ESPECIE_LEGADA, ID_ESPECIE
 from omica.config import REPO_ROOT
 from omica.contrato.formatos import (CHECAGENS, COLUNAS_CHAVE, COLUNAS_DE_NIVEL,
                                      COLUNAS_GARANTIDAS, FORMATOS_CHECAGEM, IRMAOS,
                                      REFERENCIAVEIS, VALIDADORES, regra_de_nome)
-from omica.registry import Manifest, ScriptSpec, load_registry
+from omica.registry import Manifest, ScriptSpec, campos_do_cmd, load_registry
 
 PIPELINES_DIR = REPO_ROOT / "pipelines"
 _ID = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -145,6 +146,10 @@ class Pipeline(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
     modulo: str
+    # v2 multiespécie (M0): espécies em que o pipeline roda. Cada passo tem de declarar TODAS
+    # (ScriptSpec.especies) — validar_contrato recusa o pipeline que promete mais do que os
+    # scripts que encadeia. O default é o que todo pipeline é hoje.
+    especies: list[str] = Field(default_factory=lambda: [ESPECIE_LEGADA])
     titulo: str
     descricao: str = ""
     entradas: dict[str, Entrada]
@@ -164,6 +169,9 @@ def validar_contrato(p: Pipeline, m: Manifest) -> list[str]:
     from omica.agentes.adaptador import ALVOS  # leve: só formatos, aplicar_spec e pydantic
 
     erros: list[str] = []
+    especies_fora = [e for e in p.especies if not (isinstance(e, str) and ID_ESPECIE.fullmatch(e))]
+    if not p.especies or especies_fora:
+        erros.append(f"especies vazio ou fora do padrão {p.especies!r}")
     for nome, e in p.entradas.items():
         if e.formato not in VALIDADORES:
             erros.append(f"entrada {nome}: formato desconhecido {e.formato!r}")
@@ -220,8 +228,13 @@ def validar_contrato(p: Pipeline, m: Manifest) -> list[str]:
         if spec is None:
             erros.append(f"{rotulo}: script {passo.script!r} não existe em scripts_api de {m.id}")
             continue
-        if "{saida}" not in spec.cmd:
+        # pelo NOME do campo (o parser do str.format), não pelo texto: `{{saida}}` escapado é
+        # texto literal e passava aqui (resíduo do achado #37 da revisão F2)
+        if "saida" not in campos_do_cmd(spec.cmd)[0]:
             erros.append(f"{rotulo}: cmd de {spec.key} não grava em {{saida}} (sobrescreveria o demo)")
+        fora_esp = sorted(set(p.especies) - set(spec.especies))
+        if fora_esp:
+            erros.append(f"{rotulo}: {spec.key} não declara as espécies {fora_esp}")
         nomes = {par.name for par in spec.params}
         for param, ref in passo.liga.items():
             if param not in nomes:
