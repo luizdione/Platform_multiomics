@@ -12,11 +12,17 @@ import posixpath
 import re
 import shlex
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
+from omica.chaves_contexto import CHAVES_CONTEXTO, ESPECIE_LEGADA, ID_DEMO, SLUG_DEMO, eh_chave_contexto
 from omica.config import REPO_ROOT, get_config
 from omica.jobs import queue
 from omica.registry import Manifest, ParamSpec, ScriptSpec, campos_do_cmd, load_registry
+
+if TYPE_CHECKING:
+    # só para tipos: em tempo de execução o dispatch nunca importa omica.contexto (o ciclo seria
+    # contexto → especies → dispatch); quem chama passa o Contexto já resolvido
+    from omica.contexto import Contexto
 
 _log = logging.getLogger(__name__)
 
@@ -93,8 +99,16 @@ _TOKEN_SEGURO = re.compile(r"[A-Za-z0-9_/][A-Za-z0-9_\-./:=]*", re.ASCII)
 _NOME_GRUPO = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]*", re.ASCII)  # sem '/' e sem ':'
 _INTEIRO = re.compile(r"-?[0-9]+", re.ASCII)
 _DECIMAL = re.compile(r"-[0-9]*\.?[0-9]+|[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?", re.ASCII)
-_RAIZ_MODULO = re.compile(r"^modules/[A-Za-z0-9_]+/(demo_data|data)(/|$)", re.ASCII)
-_SAIDA_RUN = r"/results/[a-z][a-z0-9_]*/runs/[A-Za-z0-9_\-]{1,80}/[a-z][a-z0-9_]*"
+# Dados curados do REPOSITÓRIO: modules/<m>/demo_data|data e, na v2, a pasta de um subprojeto
+# versionado (projetos/<especie>/<slug>/, ids com os padrões de omica.chaves_contexto).
+_RAIZ_MODULO = re.compile(
+    r"^(modules/[A-Za-z0-9_]+/(demo_data|data)|projetos/[a-z][a-z0-9_]{2,31}/[a-z][a-z0-9_]{2,47})(/|$)",
+    re.ASCII)
+# <módulo>/runs/<run_id>/<passo>, comum aos dois layouts de saída de run. _SAIDA_RUN (o layout
+# da v1 e do demo) tem de continuar IDÊNTICA à string de antes da v2: um run aprovado antes do
+# upgrade é remontado e comparado com o cmd aprovado (teste com o literal em test_m1_contexto).
+_RESTO_RUN = r"/[a-z][a-z0-9_]*/runs/[A-Za-z0-9_\-]{1,80}/[a-z][a-z0-9_]*"
+_SAIDA_RUN = r"/results" + _RESTO_RUN
 
 
 def _validar_caminho(caminho: str, rotulo: str) -> None:
@@ -222,12 +236,52 @@ def _validar_valor(param: ParamSpec, bruto: str) -> str:
     return bruto
 
 
+def padrao_saida(ctx: Optional["Contexto"]) -> str:
+    """Regex (sem a raiz <dados>) da pasta de saída que um run pode ter neste contexto. Sem
+    contexto ou no demo: o layout da v1 (results/<mod>/runs/...), onde os runs aprovados
+    antes do upgrade e os do n8n gravam. Fora do demo: results/projetos/<esp>/<slug>/<mod>/
+    runs/... — um subprojeto nunca grava na árvore de outro, nem na do demo."""
+    if ctx is None or ctx.eh_demo:
+        return _SAIDA_RUN
+    return "/results/projetos/" + re.escape(ctx.especie) + "/" + re.escape(ctx.slug) + _RESTO_RUN
+
+
+def valor_efetivo(param: ParamSpec, valores: Optional[dict[str, str]], ctx: Optional["Contexto"],
+                  mod_id: str, script_key: str) -> str:
+    """O valor CRU (sem strip) que o parâmetro recebe. Precedência: envio > subprojeto >
+    espécie > default do manifest. Sem contexto (ou com `padroes == {}` e escopo livre) é
+    exatamente a regra da v1: `valores.get(nome) or default`.
+
+    `escopo` (ParamSpec, fora do hash): o default de um parâmetro `especie` é bovino e não vale
+    fora de bos_taurus; o de um `subprojeto` é do demo e não vale fora de bos_taurus/demo. Sem
+    envio nem sobrescrita do contexto, recusa — rodar humano com um corte bovino seria
+    resultado errado sem erro."""
+    padroes = ctx.padroes(mod_id, script_key) if ctx is not None else {}
+    enviado = (valores or {}).get(param.name)
+    if not enviado and param.name not in padroes and ctx is not None:
+        if param.escopo == "especie" and not ctx.eh_especie_legada:
+            raise ValueError(f"{param.rotulo}: o padrão {param.default!r} é bovino; "
+                             f"informe o valor para {ctx.especie}")
+        if param.escopo == "subprojeto" and not ctx.eh_demo:
+            raise ValueError(f"{param.rotulo}: o padrão é do demo; informe o valor para {ctx.id}")
+    return enviado or padroes.get(param.name, param.default)
+
+
 def montar_cmd(spec: ScriptSpec, valores: Optional[dict[str, str]] = None,
-               saida: Optional[str] = None) -> str:
+               saida: Optional[str] = None, *, ctx: Optional["Contexto"] = None,
+               mod_id: str = "") -> str:
     """Substitui os placeholders do manifest. {dados} = OMICA_DATA; os demais
     vêm dos params declarados no spec (default < valor do formulário), sempre
-    sanitizados — o usuário preenche VALORES, nunca shell."""
+    sanitizados — o usuário preenche VALORES, nunca shell.
+
+    v2 multiespécie: `ctx` (omica.contexto.Contexto, resolvido no SERVIDOR) dá os
+    placeholders de contexto (`{ref_gtf}`...) e as sobrescritas de default. Sem `ctx`, um cmd
+    que precisa de referência é recusado; com `ctx` fora de bos_taurus/demo, só cmd que grava
+    em {saida} (scripts_api, isto é, pipeline) monta."""
     cfg = get_config()
+    if ctx is not None and not mod_id:
+        raise ValueError(f"{spec.key}: montar_cmd com contexto exige mod_id (as sobrescritas são "
+                         "por <modulo>.<script>.<param>)")
     # Os campos como o str.format os lê, não o texto do cmd (resíduo do achado #37): com a
     # busca literal por "{dados}", `{dados!s}` e `{dados:}` passavam pelas duas travas
     # abaixo e gravavam no demo selado. Conversão/especificador nem chegam a formatar —
@@ -235,11 +289,29 @@ def montar_cmd(spec: ScriptSpec, valores: Optional[dict[str, str]] = None,
     campos, problemas = campos_do_cmd(spec.cmd)
     if problemas:
         raise ValueError(f"{spec.key}: cmd com campo fora do formato: {'; '.join(problemas)}")
+    if ctx is not None and ctx.especie not in spec.especies:
+        raise ValueError(f"{spec.key} não declara a espécie {ctx.especie} (declara {spec.especies})")
+    if ctx is not None and not ctx.eh_demo and "saida" not in campos:
+        # `scripts:` e os passos de workflow selado gravam em caminho fixo do demo: fora dele
+        # sobrescreveriam o que sustenta os selos (ESPEC §10, a trava do núcleo)
+        raise ValueError(f"fora de bos_taurus/demo só pipelines executam: {spec.key} grava em caminho fixo")
     contexto: dict[str, str] = {"dados": str(cfg.data_dir)}
-    valores = valores or {}
     for param in spec.params:
-        bruto = (valores.get(param.name) or param.default).strip()
+        bruto = valor_efetivo(param, valores, ctx, mod_id, spec.key).strip()
         contexto[param.name] = _validar_valor(param, bruto)
+    # Placeholders de contexto: lista FECHADA, valores só do contexto do servidor e pelo MESMO
+    # sanitizador dos parâmetros. `requer_refs` conta mesmo sem aparecer no cmd (o script pode
+    # ler a referência por outro caminho e ainda assim exigir que ela exista no contexto).
+    for k in sorted({c for c in campos if eh_chave_contexto(c)} | set(spec.requer_refs)):
+        if k not in CHAVES_CONTEXTO:
+            raise ValueError(f"{spec.key}: placeholder de contexto fora da lista fechada: {k}")
+        if ctx is None:
+            raise ValueError(f"{spec.key} requer {k} e nenhum contexto foi dado")
+        if k not in ctx.valores:
+            raise ValueError(f"referência ausente: {k} (espécie {ctx.especie}, assembly {ctx.assembly})")
+        v = _validar_valor(ParamSpec(name=k, rotulo=k, tipo=CHAVES_CONTEXTO[k]), ctx.valores[k])
+        if k in campos:
+            contexto[k] = v
     if "saida" in campos:
         # {saida} é a pasta do run, injetada pelo SERVIDOR (omica/runs.py) — nunca vem do
         # cliente. Ainda assim passa pela mesma checagem de raiz: fora da pasta de dados,
@@ -248,9 +320,14 @@ def montar_cmd(spec: ScriptSpec, valores: Optional[dict[str, str]] = None,
             raise ValueError(f"{spec.key} grava em {{saida}} e nenhuma pasta de run foi dada")
         _validar_caminho(saida, "saida")
         raiz = re.escape(cfg.data_dir.as_posix().rstrip("/"))
-        # só results/<mod>/runs/<run_id>/<passo>: nem results/<mod>/demo (selado), nem raw/
-        if not re.fullmatch(raiz + _SAIDA_RUN, saida):
-            raise ValueError(f"saida precisa ser <dados>/results/<módulo>/runs/<run>/<passo>: {saida!r}")
+        # só results/<mod>/runs/<run_id>/<passo> (ou, fora do demo, a mesma forma sob
+        # results/projetos/<esp>/<slug>/): nem results/<mod>/demo (selado), nem raw/
+        if not re.fullmatch(raiz + padrao_saida(ctx), saida):
+            if ctx is None or ctx.eh_demo:
+                layout = "<dados>/results/<módulo>/runs/<run>/<passo>"
+            else:
+                layout = f"<dados>/results/projetos/{ctx.especie}/{ctx.slug}/<módulo>/runs/<run>/<passo>"
+            raise ValueError(f"saida precisa ser {layout}: {saida!r}")
         contexto["saida"] = saida
     elif saida is not None:
         # Template SEM {saida} recebendo uma pasta de run (revisão F2, achado #37): antes a
@@ -277,17 +354,21 @@ def montar_cmd(spec: ScriptSpec, valores: Optional[dict[str, str]] = None,
 def lancar_script(mod_id: str, script_key: str,
                   valores: Optional[dict[str, str]] = None,
                   extra_meta: Optional[dict[str, Any]] = None,
-                  api: bool = False, saida: Optional[str] = None) -> tuple[str, str]:
+                  api: bool = False, saida: Optional[str] = None, *,
+                  ctx: Optional["Contexto"] = None) -> tuple[str, str]:
     """Enfileira um script de módulo. Retorna (job_id, backend).
 
     `api=True` + `saida`: script de `scripts_api` gravando na pasta do run (F2, n8n).
+    `ctx`: o contexto (espécie, subprojeto) resolvido no servidor; sem ele, o do demo. A
+    espécie e o subprojeto vão ao meta do job (status.json, filtro de /jobs), nunca aos
+    argumentos do worker — o cmd é o único que roda.
 
     Levanta RecusadoPorRAM (guarda), FilaIndisponivel (fila especializada sem
     Redis), RuntimeIndisponivel (runtime de fase futura) ou ValueError (param).
     """
     m, spec = _resolver(mod_id, script_key, api=api)
     fila = fila_para_runtime(spec.runtime)
-    cmd = montar_cmd(spec, valores, saida=saida)
+    cmd = montar_cmd(spec, valores, saida=saida, ctx=ctx, mod_id=mod_id)
     return queue.enqueue(
         "omica.jobs.script_job.executar",
         prefixo=f"{mod_id}-{script_key}",
@@ -299,12 +380,19 @@ def lancar_script(mod_id: str, script_key: str,
         script=script_key,
         titulo=spec.titulo,
         runtime=spec.runtime,
+        # runs.py nunca põe estas duas em extra_meta (seria kwarg duplicado)
+        especie=ctx.especie if ctx is not None else ESPECIE_LEGADA,
+        subprojeto=ctx.slug if ctx is not None else SLUG_DEMO,
         **(extra_meta or {}),
     )
 
 
-def lancar_workflow(mod_id: str, wf_id: str) -> tuple[str, list[str], str]:
+def lancar_workflow(mod_id: str, wf_id: str, *,
+                    ctx: Optional["Contexto"] = None) -> tuple[str, list[str], str]:
     """Enfileira um workflow inteiro (passos encadeados por depends_on).
+
+    Um workflow selado só roda nos subprojetos de `validado_em` (padrão: o demo): os passos
+    são de `scripts:` e gravam em caminho fixo. Sem `ctx`, é o demo.
 
     Retorna (wf_run_id, job_ids, backend)."""
     reg = load_registry()
@@ -314,6 +402,12 @@ def lancar_workflow(mod_id: str, wf_id: str) -> tuple[str, list[str], str]:
     wf = next((w for w in m.workflows if w.id == wf_id), None)
     if wf is None:
         raise KeyError(f"workflow desconhecido: {mod_id}/{wf_id}")
+    alvo = ctx.id if ctx is not None else ID_DEMO
+    if alvo not in wf.validado_em:
+        raise ValueError(f"{mod_id}/{wf_id} não é validado em {alvo} (validado em {wf.validado_em}); "
+                         "fora de bos_taurus/demo só pipelines executam")
+    especie = ctx.especie if ctx is not None else ESPECIE_LEGADA
+    subprojeto = ctx.slug if ctx is not None else SLUG_DEMO
     itens = []
     for passo in wf.passos:
         _, spec = _resolver(mod_id, passo)
@@ -323,10 +417,12 @@ def lancar_workflow(mod_id: str, wf_id: str) -> tuple[str, list[str], str]:
             "mem_gb": spec.mem_gb,
             "fila": fila_para_runtime(spec.runtime),
             "timeout_s": 6 * 3600,
-            "meta": {"cmd": montar_cmd(spec), "modulo": mod_id, "script": passo,
-                     "titulo": spec.titulo, "runtime": spec.runtime},
+            "meta": {"cmd": montar_cmd(spec, ctx=ctx, mod_id=mod_id), "modulo": mod_id, "script": passo,
+                     "titulo": spec.titulo, "runtime": spec.runtime,
+                     "especie": especie, "subprojeto": subprojeto},
         })
     return queue.enqueue_cadeia(itens, wf_meta={
         "prefixo": f"wf-{mod_id}-{wf_id}", "modulo": mod_id,
         "workflow": wf_id, "titulo": wf.titulo,
+        "especie": especie, "subprojeto": subprojeto,
     })

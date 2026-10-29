@@ -23,6 +23,10 @@ O que este arquivo existe para garantir:
   worker atesta de novo as entradas que o passo lê, ao começar e ao terminar, e o envelope
   compara os dois atestados com o plano.
 - Cada passo grava em results/<mod>/runs/<run_id>/<passo>/ — o demo selado nunca é tocado.
+  Na v2 multiespécie, um run tem CONTEXTO (espécie, subprojeto; omica/contexto.py): no demo
+  (padrão, e todo run de antes da v2) o layout continua esse; fora dele, results/projetos/
+  <esp>/<slug>/<mod>/runs/<run_id>/<passo>/. O sha do contexto entra no plano aprovado: um
+  YAML de espécie/subprojeto ou um amostras.tsv mudado depois disso dá 409 contexto_mudou.
 - O envelope (o que o passo seguinte e o relatório recebem) é montado no SERVIDOR, com
   sha256, frescor e validação de formato de cada porta, e com o que o WORKER registrou: a
   proveniência ao começar a rodar (tem de ser a do plano) e o sha256 de cada porta ao
@@ -55,7 +59,8 @@ import time
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from omica import __version__, proveniencia
+from omica import __version__, contexto, proveniencia
+from omica.chaves_contexto import ESPECIE_LEGADA, ID_ESPECIE, SLUG, SLUG_DEMO
 from omica.config import REPO_ROOT, get_config
 from omica.contrato import bgzf, formatos
 from omica.jobs import dispatch, queue, script_job
@@ -272,13 +277,130 @@ def _runs_no_disco() -> Iterator[tuple[str, dict[str, Any]]]:
             yield r["run_id"], r
 
 
+# --------------------------------------------------------------------- contexto
+def _traduzir(e: contexto.ContextoRecusado) -> ErroRun:
+    return ErroRun(e.status, e.erro, **e.detalhe)
+
+
+def _resolver_contexto(especie: str, subprojeto: str,
+                       cat: Optional[contexto.Catalogo] = None) -> contexto.Contexto:
+    try:
+        return contexto.resolver(especie, subprojeto, cat=cat)
+    except contexto.ContextoRecusado as e:
+        raise _traduzir(e) from None
+
+
+def _contexto_do_plano(plano: dict[str, Any]) -> contexto.Contexto:
+    try:
+        return contexto.do_plano(plano)
+    except contexto.ContextoRecusado as e:
+        raise _traduzir(e) from None
+
+
+def _contexto_gravado(run: dict[str, Any]) -> tuple[str, str]:
+    """(espécie, slug) do run.json. Run de antes da v2 (sem os dois campos) é do demo; só um
+    dos dois, ou fora do padrão, é run corrompido — esses ids viram caminho de pasta."""
+    esp, sub = run.get("especie"), run.get("subprojeto")
+    if esp is None and sub is None:
+        return ESPECIE_LEGADA, SLUG_DEMO
+    if not (isinstance(esp, str) and isinstance(sub, str)
+            and ID_ESPECIE.fullmatch(esp) and SLUG.fullmatch(sub)):
+        raise ErroRun(409, "run_corrompido", campo="especie/subprojeto")
+    return esp, sub
+
+
+def _contexto_do_run(run: dict[str, Any], cat: Optional[contexto.Catalogo] = None) -> contexto.Contexto:
+    esp, sub = _contexto_gravado(run)
+    return _resolver_contexto(esp, sub, cat)
+
+
+def _exigir_execucao(p: Pipeline, ctx: contexto.Contexto, cat: Optional[contexto.Catalogo] = None) -> None:
+    ok, motivo = contexto.execucao_permitida(ctx.especie, ctx.slug, "pipeline", pipeline=p, cat=cat)
+    if not ok:
+        raise ErroRun(contexto.STATUS_DA_RECUSA[motivo], motivo, pipeline=p.id,
+                      especie=ctx.especie, subprojeto=ctx.slug, especies=list(p.especies))
+
+
+_REL_RESULTADOS = r"(projetos/[a-z][a-z0-9_]{2,31}/[a-z][a-z0-9_]{2,47}/)?[a-z][a-z0-9_]*/runs/"
+
+
+def pasta_resultados(run: dict[str, Any], plano: Optional[dict[str, Any]] = None) -> Path:
+    """Onde os passos e o relatório de um run gravam: results/<rel>, com <rel> RECALCULADO de
+    (espécie, subprojeto, módulo, run_id) — crítica v2, médio 6. O campo `resultados` do
+    run.json é só conferido: um run.json adulterado (`../../x`, ou a pasta de outro
+    subprojeto) levaria o relatório para fora da árvore do run. Run de antes da v2: o demo.
+
+    Com o `plano` (o relatório tem), a espécie e o subprojeto do run.json também têm de ser os
+    do plano — o plano é o que o autor aprovou, e as saídas dos passos já estão na pasta dele;
+    plano sem `contexto` (de antes da v2) é do demo."""
+    run_id, modulo = run.get("run_id"), run.get("modulo")
+    if not (isinstance(run_id, str) and _ID_RUN.fullmatch(run_id)):
+        raise ErroRun(409, "run_corrompido", campo="run_id")
+    if not (isinstance(modulo, str) and re.fullmatch(r"[a-z][a-z0-9_]*", modulo, re.ASCII)):
+        raise ErroRun(409, "run_corrompido", campo="modulo")
+    esp, sub = _contexto_gravado(run)
+    if plano is not None:
+        c = plano.get("contexto")
+        do_plano = ((c.get("especie"), c.get("subprojeto")) if isinstance(c, dict)
+                    else (ESPECIE_LEGADA, SLUG_DEMO) if c is None else None)
+        if do_plano != (esp, sub) or plano.get("modulo", modulo) != modulo:
+            raise ErroRun(409, "run_corrompido", campo="especie/subprojeto", detalhe="difere do plano aprovado")
+    rel = contexto.rel_resultados_de(esp, sub, modulo, run_id)
+    gravado = run.get("resultados")
+    if (gravado is not None and gravado != rel) or not re.fullmatch(
+            _REL_RESULTADOS + re.escape(run_id), rel, re.ASCII):
+        raise ErroRun(409, "run_corrompido", campo="resultados")
+    return get_config().results_dir / rel
+
+
+def listar(especie: Optional[str] = None, subprojeto: Optional[str] = None,
+           limite: int = 50) -> list[dict[str, Any]]:
+    """Runs do disco, mais novos primeiro, filtrados por espécie e/ou subprojeto (slug). Run
+    sem os campos (de antes da v2) conta como bos_taurus/demo. Itens leves: não decide estado
+    nem lê envelope; `tem_relatorio` é só um stat."""
+    itens: list[dict[str, Any]] = []
+    for rid, r in _runs_no_disco():
+        try:
+            esp, sub = _contexto_gravado(r)
+        except ErroRun:
+            continue  # run.json corrompido não entra na lista (nem quebra a página)
+        if (especie is not None and esp != especie) or (subprojeto is not None and sub != subprojeto):
+            continue
+        try:
+            tem_relatorio = (pasta_resultados(r) / "relatorio" / "relatorio.html").is_file()
+        except (ErroRun, OSError):
+            tem_relatorio = False  # crítica v2, médio 5: um run corrompido não vira 500
+        criado = r.get("criado_em")
+        itens.append({"run_id": rid, "pipeline": r.get("pipeline"), "modulo": r.get("modulo"),
+                      "estado": r.get("estado"),
+                      "criado_em": criado if isinstance(criado, (int, float)) else None,
+                      "especie": esp, "subprojeto": sub, "tem_relatorio": tem_relatorio})
+    itens.sort(key=lambda x: x["criado_em"] or 0.0, reverse=True)
+    return itens[:max(0, int(limite))]
+
+
 # ------------------------------------------------------------------------ ciclo
-def criar(pipeline_id: str) -> dict[str, Any]:
+def criar(pipeline_id: str, especie: Optional[str] = None,
+          subprojeto: Optional[str] = None) -> dict[str, Any]:
     """Run novo. Runs ainda não aprovados (criado/planejado) têm teto,
     OMICA_MAX_RUNS_ABERTOS (padrão 20): cada um guarda cópias de entradas de até 256 MB, e
     criar runs em laço enchia o E:\\data, o disco dividido com a MD e o Boltz. A definição
-    usada (passos, escolhas) fica no run.json: a visão do run não relê o catálogo."""
+    usada (passos, escolhas) fica no run.json: a visão do run não relê o catálogo.
+
+    Contexto (v2): sem espécie e subprojeto, o demo, com o aviso
+    `contexto_padrao_bos_taurus_demo` na resposta (é o que o formulário do n8n manda hoje);
+    só um dos dois é 422 `contexto_incompleto`. O pipeline tem de ser da espécie, do
+    subprojeto e de um módulo habilitado nele (contexto.execucao_permitida)."""
     p, _ = _pipeline(pipeline_id)
+    avisos: list[str] = []
+    if especie is None and subprojeto is None:
+        especie, subprojeto = ESPECIE_LEGADA, SLUG_DEMO
+        avisos.append("contexto_padrao_bos_taurus_demo")
+    elif especie is None or subprojeto is None:
+        raise ErroRun(422, "contexto_incompleto", especie=especie, subprojeto=subprojeto)
+    cat = contexto.catalogo()
+    ctx = _resolver_contexto(especie, subprojeto, cat)
+    _exigir_execucao(p, ctx, cat)
     limite = int(os.environ.get("OMICA_MAX_RUNS_ABERTOS", "20"))
     with _trava_global(".trava_abertos"):
         abertos = [rid for rid, r in _runs_no_disco() if r.get("estado") in ABERTOS]
@@ -287,10 +409,14 @@ def criar(pipeline_id: str) -> dict[str, Any]:
         run_id = f"{p.id}-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
         run = {"run_id": run_id, "pipeline": p.id, "modulo": p.modulo, "versao_omica": __version__,
                "criado_em": time.time(), "estado": "criado", "entradas": {}, "checagens": [],
-               "plano_sha256": None, "passos": {}, "versao": 0}
+               "plano_sha256": None, "passos": {}, "versao": 0,
+               "especie": ctx.especie, "subprojeto": ctx.slug, "assembly": ctx.assembly,
+               "contexto_sha256": ctx.sha256,
+               "resultados": contexto.rel_resultados(ctx, p.modulo, run_id)}
         _derivar(p, run)
         _gravar_run(run_id, run)
-    return estado(run_id)
+    resposta = estado(run_id)
+    return {**resposta, "avisos": avisos} if avisos else resposta
 
 
 def _carregar(run_id: str) -> dict[str, Any]:
@@ -845,7 +971,10 @@ def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
     SnpEff, literais no cmd do manifest; o cache do VEP, default do vep_anotacao.py) ficam
     FORA do plano — sem impressão nem sha. O argv congelado prova QUAL caminho foi usado, não
     o conteúdo dele: trocar o banco muda o resultado sem o plano acusar. Fechar isso pede o
-    manifest declarar as referências de cada script (o contrato hoje não tem esse campo)."""
+    manifest declarar as referências de cada script (o contrato hoje não tem esse campo).
+    v2: o GTF e o banco do SnpEff de painel_bed/snpeff passaram a `{ref_*}` (requer_refs), e o
+    VALOR de cada referência entra no plano (`contexto.valores`, coberto pelo sha); o
+    CONTEÚDO continua sem impressão, salvo o MANIFEST.json das refs quando ele existir."""
     with _trava(run_id):
         run = _carregar(run_id)
         if run["estado"] not in ABERTOS:
@@ -865,8 +994,12 @@ def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
                 raise ErroRun(422, "escolha_fora_do_dado", escolha=nome,
                               recebido=escolhas.get(nome), validos=op["valores"])
 
-        cfg = get_config()
-        base = cfg.results_dir / p.modulo / "runs" / run_id
+        # o contexto de AGORA (o YAML pode ter mudado desde o criar) e a regra de execução de
+        # novo: um subprojeto que deixou de listar o pipeline não planeja
+        cat = contexto.catalogo()
+        ctx = _contexto_do_run(run, cat)
+        _exigir_execucao(p, ctx, cat)
+        base = pasta_resultados(run)
         resolvidos: dict[str, dict[str, Any]] = {}
         passos = []
         for passo in p.passos:
@@ -887,11 +1020,15 @@ def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
                     valores[param] = resolvidos[origem]["valores"][outro]
                 else:
                     valores[param] = v
-            for par in spec.params:
-                valores.setdefault(par.name, par.default)
             saida = (base / passo.id).as_posix()
             try:
-                cmd = dispatch.montar_cmd(spec, valores, saida=saida)
+                # o plano congela TODO valor, explícito: o que o pipeline não liga vem do
+                # contexto (subprojeto > espécie) ou do default, pela MESMA regra do montar_cmd
+                # (um default bovino de escopo `especie` fora de bos_taurus é recusado aqui)
+                for par in spec.params:
+                    if par.name not in valores:
+                        valores[par.name] = dispatch.valor_efetivo(par, valores, ctx, p.modulo, spec.key)
+                cmd = dispatch.montar_cmd(spec, valores, saida=saida, ctx=ctx, mod_id=p.modulo)
             except ValueError as e:
                 raise ErroRun(422, "parametro_recusado", passo=passo.id, detalhe=str(e)) from None
             portas = {nome: {"arquivo": porta.arquivo, "formato": porta.formato,
@@ -919,6 +1056,9 @@ def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
             "recursos": {"pico_mem_gb": max((x["mem_gb"] for x in passos), default=0),
                          "tempos": [x["tempo_estimado"] for x in passos]},
             "relatorio": p.relatorio.model_dump(),
+            # o contexto (com o sha dele) entra no plano e, portanto, no plano_sha256: aprovar
+            # e executar conferem que as refs, o subprojeto e o amostras.tsv são os aprovados
+            "contexto": ctx.para_plano(),
         }
         # O sha é do objeto que VOLTA do disco, não do que está em memória: uma chave não-texto
         # vinda do YAML (top: {10: ..., 9: ...}) muda de ordem ao virar texto, e o aprovar
@@ -926,6 +1066,7 @@ def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
         plano = json.loads(json.dumps(plano, ensure_ascii=False))
         plano["plano_sha256"] = _sha_canonico(plano)
         _gravar(_pasta(run_id) / "plano_proposto.json", plano)
+        run["contexto_sha256"] = ctx.sha256
         run["estado"], run["plano_sha256"] = "planejado", None
         run["escolhas_opcoes"], run["passos_pipeline"] = opcoes, [x.id for x in p.passos]
         _gravar_run(run_id, run)
@@ -948,6 +1089,10 @@ def aprovar(run_id: str, plano_sha256: str) -> dict[str, Any]:
             # o autor aprovou OUTRO plano (ex.: entradas trocadas depois do formulário)
             raise ErroRun(409, "plano_divergente", esperado=proposto["plano_sha256"])
         _entradas_intactas(proposto["entradas"])
+        if "contexto" in proposto:
+            # refs/subprojeto/amostras.tsv mudados entre o plano e a aprovação: o autor
+            # aprovaria um plano que já não descreve o que vai rodar (409 contexto_mudou)
+            _contexto_do_plano(proposto)
         with _vaga_de_run(run_id):
             _gravar(_pasta(run_id) / "plano.json", proposto)
             run["estado"], run["plano_sha256"], run["aprovado_em"] = "aprovado", proposto["plano_sha256"], time.time()
@@ -1256,12 +1401,18 @@ def executar_passo(run_id: str, passo_id: str) -> dict[str, Any]:
         if atual:
             _conferir_relancamento(run_id, passo_id, atual, run, plano)
         item = plano["passos"][idx]
+        # ANTES do manifest: com o contexto mudado, o motivo é contexto_mudou (o cmd remontado
+        # também divergiria, mas manifest_mudou apontaria para o lugar errado). Plano de antes
+        # da v2 (sem a chave): o contexto do demo — desvio declarado do plano §4, para um
+        # genomica_painel antigo continuar executável depois do {ref_gtf} (o cmd sai igual).
+        ctx = _contexto_do_plano(plano)
         m = load_registry().por_id(plano["modulo"])
         spec = spec_api(m, item["script"]) if m else None
         if spec is None:
             raise ErroRun(409, "manifest_mudou", detalhe=f"{item['script']} saiu de scripts_api")
         try:
-            cmd = dispatch.montar_cmd(spec, item["valores"], saida=item["saida"])
+            cmd = dispatch.montar_cmd(spec, item["valores"], saida=item["saida"], ctx=ctx,
+                                      mod_id=plano["modulo"])
         except (ValueError, KeyError) as e:  # KeyError: placeholder sem param (manifest mexido)
             raise ErroRun(409, "manifest_mudou", detalhe=str(e)) from None
         if cmd != item["cmd"]:
@@ -1295,7 +1446,7 @@ def executar_passo(run_id: str, passo_id: str) -> dict[str, Any]:
             try:
                 job_id, backend = dispatch.lancar_script(
                     plano["modulo"], item["script"], valores=item["valores"],
-                    extra_meta=extra_meta, api=True, saida=item["saida"])
+                    extra_meta=extra_meta, api=True, saida=item["saida"], ctx=ctx)
             except BaseException:
                 # nada ficou na fila (o enqueue marca 'error' o status que chegou a gravar): o
                 # passo volta ao que era; se nem isso gravar, o retry reconcilia o marcador

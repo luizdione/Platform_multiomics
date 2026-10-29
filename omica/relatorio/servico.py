@@ -7,7 +7,8 @@ Fluxo com o n8n (a chave da Anthropic fica SÓ no n8n; aqui nunca passa):
      O n8n só embrulha isso no corpo da chamada.
   2. o n8n chama o Claude e devolve o JSON do bloco de texto em `receber(...)`.
   3. `receber(run_id, rascunho, ...)` — revalida o esquema, roda o portão de números e, se
-     passar, renderiza em results/<mod>/runs/<run_id>/relatorio/. Reprovado → devolve as
+     passar, renderiza em <pasta de resultados do run>/relatorio/ (results/<mod>/runs/<run_id>/
+     no demo; results/projetos/<esp>/<slug>/<mod>/runs/<run_id>/ fora dele). Reprovado → devolve as
      falhas para UMA nova tentativa; na segunda reprovação o n8n leva ao autor.
 """
 from __future__ import annotations
@@ -132,13 +133,26 @@ def receber(run_id: str, bruto: Any, modelo: str = "", stop_reason: str = "",
     pasta, run, plano = _pastas(run_id)
     try:
         with trava(pasta / ".trava_relatorio", 30.0):
-            return _receber(run_id, pasta, plano, bruto, modelo, stop_reason, autor)
+            return _receber(run_id, pasta, plano, run, bruto, modelo, stop_reason, autor)
     except TravaOcupada:
         raise ErroRelatorio(409, "relatorio_ocupado", run_id=run_id) from None
 
 
-def _receber(run_id: str, pasta: Path, plano: dict[str, Any], bruto: Any, modelo: str,
-             stop_reason: str, autor: bool) -> dict[str, Any]:
+def _receber(run_id: str, pasta: Path, plano: dict[str, Any], run: dict[str, Any], bruto: Any,
+             modelo: str, stop_reason: str, autor: bool) -> dict[str, Any]:
+    from omica import runs
+
+    try:
+        # a pasta do run (results/<mod>/runs/... no demo; results/projetos/<esp>/<slug>/... fora
+        # dele), RECALCULADA do contexto do run e conferida com o do plano aprovado — nunca um
+        # campo do run.json que alguém edite.
+        # Antes de registrar a tentativa: run corrompido não gasta a cota automática.
+        # o módulo do plano aprovado completa um registro que não o traga (a visão do run
+        # sempre traz; um run.json com OUTRO módulo é recusado pela conferência com o plano)
+        ref = {"modulo": plano.get("modulo"), **run, "run_id": run_id}
+        saida = runs.pasta_resultados(ref, plano) / "relatorio"
+    except runs.ErroRun as e:
+        raise ErroRelatorio(e.status, e.erro, **e.detalhe) from None
     destino = pasta / "relatorio"
     fichario = destino / "fatos.json"
     if not fichario.exists():
@@ -173,7 +187,6 @@ def _receber(run_id: str, pasta: Path, plano: dict[str, Any], bruto: Any, modelo
                 "restam_automaticas": max(0, MAX_TENTATIVAS_AUTOMATICAS - automaticas - (0 if autor else 1))}
 
     cfg = get_config()
-    saida = cfg.results_dir / plano["modulo"] / "runs" / run_id / "relatorio"
     (saida / "figuras").mkdir(parents=True, exist_ok=True)
     for fig in ficha["figuras"]:
         shutil.copyfile(fig["arquivo"], saida / "figuras" / Path(fig["arquivo"]).name)

@@ -44,11 +44,12 @@ def lancados(monkeypatch):
     envelope confere que o job que rodou é o do plano)."""
     chamadas: list[dict] = []
 
-    def falso(mod_id, script_key, valores=None, extra_meta=None, api=False, saida=None):
+    def falso(mod_id, script_key, valores=None, extra_meta=None, api=False, saida=None, *, ctx=None):
         spec = spec_api(load_registry().por_id(mod_id), script_key)
         job_id = queue.novo_job_id(f"{mod_id}-{script_key}")
         queue.write_status(job_id, "queued", modulo=mod_id, script=script_key,
-                           cmd=dispatch.montar_cmd(spec, valores, saida=saida), runtime=spec.runtime,
+                           cmd=dispatch.montar_cmd(spec, valores, saida=saida, ctx=ctx, mod_id=mod_id),
+                           runtime=spec.runtime,
                            fila=dispatch.fila_para_runtime(spec.runtime), mem_gb=spec.mem_gb,
                            **(extra_meta or {}))
         chamadas.append({"mod": mod_id, "script": script_key, "valores": dict(valores or {}),

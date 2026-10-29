@@ -180,10 +180,14 @@ scripts_api:
     titulo: "Painel de genes → BED (GTF local, ARS-UCD1.3.113)"
     descricao: Resolve os símbolos no GTF do banco SnpEff local e grava o BED com flanco.
     runtime: "image:omica-bioinfo"
+    # v2 (B5): o GTF vem do contexto (especies/<esp>.yaml, assembly do subprojeto). No demo é o
+    # mesmo literal de antes (/data/snpeff_data/ARS-UCD1.3.113/genes.gtf.gz) e o cmd sai byte
+    # a byte igual (tests/golden/cmd_demo_v1.json)
+    requer_refs: [ref_gtf]
     cmd: >-
       python3 modules/genomica/scripts/coordenadas_painel.py
       --painel {painel} --pad {pad}
-      --gtf /data/snpeff_data/ARS-UCD1.3.113/genes.gtf.gz
+      --gtf {ref_gtf}
       --saida {saida}
     params:
       - {name: painel, rotulo: "Painel (símbolos, 1 por linha)", tipo: caminho}
@@ -240,9 +244,11 @@ scripts_api:
     titulo: "Anotação SnpEff (ARS-UCD1.3.113)"
     descricao: Anota com o banco custom local e conta o 1º efeito de cada variante (top 15).
     runtime: "image:omica-bioinfo"
+    # v2 (B5): banco e pasta do SnpEff vêm do contexto; no demo, os mesmos literais de antes
+    requer_refs: [ref_snpeff_db, ref_snpeff_datadir]
     cmd: >-
       python3 modules/genomica/scripts/anotacao_snpeff.py
-      --entrada {vcf} --db ARS-UCD1.3.113 --datadir /data/snpeff_data --xmx 4g
+      --entrada {vcf} --db {ref_snpeff_db} --datadir {ref_snpeff_datadir} --xmx 4g
       --saida {saida}
     params:
       - {name: vcf, rotulo: "VCF extraído", tipo: caminho}
