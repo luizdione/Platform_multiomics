@@ -6,6 +6,8 @@ Comandos:
   reindex   regenera data/skills_index.json a partir do INDICE_CONSOLIDADO.md
             e atualiza a cópia do glossário de busca PT→EN (data/skills_glossario.json)
   versao    imprime a versão
+  importar-subprojetos --dry-run --catalogo <yaml> [--saida <pasta>] [--json <relatorio.json>]
+            confere um catálogo de subprojetos legados (v2, M5; nesta etapa SÓ --dry-run)
 """
 from __future__ import annotations
 
@@ -29,6 +31,22 @@ def main(argv: list[str] | None = None) -> int:
         help="regrava hash_scripts nos manifests — use SÓ depois de re-executar "
              "o workflow de verdade; o selo afirma que o E2E rodou")
     sub.add_parser("versao", help="imprime a versão")
+    p_importar = sub.add_parser(
+        "importar-subprojetos",
+        help="confere um catálogo de subprojetos legados (nesta etapa SÓ --dry-run)")
+    p_importar.add_argument(
+        "--dry-run", action="store_true",
+        help="obrigatório nesta etapa: confere e relata, sem importar nada")
+    p_importar.add_argument(
+        "--catalogo", required=True,
+        help="YAML do catálogo (FORA do repositório: traz perguntas de artigo)")
+    p_importar.add_argument(
+        "--saida", default=None,
+        help="grava <saida>/<esp>/<slug>/{subprojeto.yaml,amostras.tsv} para revisão; "
+             "recusado dentro do repositório, de GENOME_DATA ou de OMICA_DATA")
+    p_importar.add_argument(
+        "--json", default=None, dest="json_saida",
+        help="relatório em JSON; mesma recusa do --saida")
     args = parser.parse_args(argv)
 
     if args.comando == "serve":
@@ -55,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
         from omica.selos import main as selos_main
 
         return selos_main(gravar=args.gravar)
+    if args.comando == "importar-subprojetos":
+        from omica.importador import main as importar_main
+
+        return importar_main(dry_run=args.dry_run, catalogo=args.catalogo, saida=args.saida,
+                             json_saida=args.json_saida)
     if args.comando == "versao":
         from omica import __version__
 
