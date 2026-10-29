@@ -57,7 +57,8 @@ def test_modo_aula_frontmatter_e_botoes():
     r = _client().get("/ajuda/03_aula_do_painel_ao_efeito.md")
     assert r.status_code == 200
     assert "Executar este passo" in r.text
-    assert '/modulos/genomica/workflows/wf_painel_demo' in r.text
+    # os botões da aula executam na rota canônica do demo (a v1 passaria por substring)
+    assert 'action="/e/bos_taurus/demo/modulos/genomica/workflows/wf_painel_demo"' in r.text
 
 
 def test_doc_sem_frontmatter_continua_funcionando():

@@ -77,6 +77,34 @@ def _manifests() -> Checagem:
     return Checagem("Manifests dos módulos", OK, f"{len(reg.modules)} módulos válidos")
 
 
+def _especies_e_subprojetos(detalhar_privados: bool = True) -> list[Checagem]:
+    """Crítica v2, médio 15 (anti-lição nº 2): espécie ou subprojeto cujo YAML não carrega some
+    da 1ª página — o doctor diz qual e por quê. Espécie e subprojeto do REPOSITÓRIO (curados,
+    versionados) quebrados = FALHA; rascunho/legado em <OMICA_DATA>/projetos = AVISO (é local
+    e o resto carrega). Na página /diagnostico, sem a autorização do autor, os erros de <dados>
+    (subprojetos privados) saem só contados (médio 16)."""
+    from omica.saude import ORIGEM_DADOS, erros_de_carga, redigir_erros_subprojetos
+
+    carga = erros_de_carga()
+    itens: list[Checagem] = []
+    nome = "Espécies (especies/*.yaml)"
+    if carga["erros_especies"]:
+        detalhe = "; ".join(f"{k}: {v}" for k, v in carga["erros_especies"].items())
+        itens.append(Checagem(nome, FALHA, detalhe[:300]))
+    else:
+        itens.append(Checagem(nome, OK, f"{carga['especies']} espécie(s) carregadas"))
+    nome = "Subprojetos (projetos/ e <dados>/projetos)"
+    erros = carga["erros_subprojetos"]
+    if not erros:
+        itens.append(Checagem(nome, OK, f"{carga['subprojetos']} subprojeto(s) carregados"))
+        return itens
+    do_repo = any(not k.startswith(ORIGEM_DADOS) for k in erros)
+    mostrados = redigir_erros_subprojetos(erros, detalhar_privados)
+    detalhe = f"{len(erros)} com erro — " + "; ".join(f"{k}: {v}" for k, v in mostrados.items())
+    itens.append(Checagem(nome, FALHA if do_repo else AVISO, detalhe[:300]))
+    return itens
+
+
 def _redis() -> Checagem:
     cfg = get_config()
     if not cfg.redis_url:
@@ -365,13 +393,16 @@ def _glossario() -> Checagem:
         return Checagem("Glossário", FALHA, f"ilegível: {e}")
 
 
-def rodar(checar_docker: bool = True) -> list[Checagem]:
+def rodar(checar_docker: bool = True, *, detalhar_privados: bool = True) -> list[Checagem]:
+    """`detalhar_privados=False` (página /diagnostico sem a autorização do autor): erro de
+    subprojeto de <dados> sai só contado. O CLI, no host do autor, mostra tudo."""
     checagens: list[Checagem] = [Checagem("Versão", OK, f"omica {__version__}")]
     if checar_docker:
         checagens.append(_docker_vivo())
     checagens.extend(_dados())
     checagens.append(_ram())
     checagens.append(_manifests())
+    checagens.extend(_especies_e_subprojetos(detalhar_privados))
     checagens.append(_redis())
     checagens.append(_workers())
     checagens.extend(_referencias())

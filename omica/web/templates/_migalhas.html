@@ -1,0 +1,7 @@
+{# trilha de contexto: Espécies › espécie › subprojeto › módulo (o contexto vive na URL, sem cookie) #}
+<nav class="migalhas">
+  <a href="/?lang={{ lang }}">{{ t('especies', lang) }}</a>
+  {% if esp %} › <a href="/e/{{ esp.id }}?lang={{ lang }}">{{ esp.nome_exibido if lang == 'pt' else esp.nome_exibido_en }}</a>{% endif %}
+  {% if sub %} › <a href="/e/{{ esp.id }}/{{ sub.slug }}?lang={{ lang }}"><code>{{ sub.slug }}</code></a>{% endif %}
+  {% if m %} › {{ m.nome_pt if lang == 'pt' else m.nome_en }}{% endif %}
+</nav>

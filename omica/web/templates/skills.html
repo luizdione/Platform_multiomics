@@ -2,6 +2,11 @@
 {% block titulo %}ômica — Skills{% endblock %}
 {% block conteudo %}
 <h1>🧰 {{ t('skills_titulo', lang) }}</h1>
+{# índice ausente: a página responde 503 com o aviso (antes redirecionava para "/", que na v2
+   é a escolha da espécie e não explicava nada) #}
+{% if indice is none %}
+<p class="alerta" id="skills-sem-indice">⚠️ {{ t('skills_sem_indice', lang) }}</p>
+{% else %}
 <p>{{ t('skills_sub', lang) }}</p>
 <p class="meta">{{ indice.total }} skills · {{ indice.dominios | length }} {{ t('dominios', lang) }} · {{ t('gerado_em', lang) }} {{ indice.gerado_em }}</p>
 
@@ -40,4 +45,5 @@
 {# ?v= fura o cache do navegador a cada versão: este JS mudou de contrato com a página
    (antes lia o índice embutido) e a cópia antiga em cache deixaria a tabela vazia #}
 <script src="/static/skills.js?v={{ versao }}"></script>
+{% endif %}
 {% endblock %}

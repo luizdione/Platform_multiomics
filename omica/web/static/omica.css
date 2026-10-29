@@ -80,3 +80,30 @@ button:hover { background: var(--primaria-escura); }
 .rodape { text-align: center; color: var(--tinta-suave); font-size: .85rem; padding: 1rem; }
 code { background: #eef3f6; padding: .05rem .3rem; border-radius: 4px; }
 .console code { background: transparent; }
+
+/* v2 multiespécie (M3): estado da referência da espécie, status do subprojeto, trilha
+   espécie › subprojeto › módulo, botões-link e alertas. Cores só daqui (sem estilo inline). */
+.badge.estado-pronta { background: #27ae60; }
+.badge.estado-parcial { background: #f39c12; }
+.badge.estado-sem_referencia { background: #95a5a6; }
+.badge.sub-valido { background: #27ae60; }
+.badge.sub-draft { background: #3498db; }
+.badge.sub-a_revisar { background: #f39c12; }
+.badge.sub-invalido { background: var(--erro); }
+.badge.sub-arquivado { background: #6b7280; }
+.badge.privado { background: #7c3aed; }
+.migalhas { font-size: .9rem; color: var(--tinta-suave); margin-bottom: .8rem; }
+.migalhas a { color: var(--tinta-suave); }
+.botao {
+  display: inline-block; background: var(--primaria); color: #fff; border-radius: 8px;
+  padding: .45rem 1rem;
+}
+.botao:hover { background: var(--primaria-escura); text-decoration: none; }
+.botao.desabilitado { background: #b8c2cc; cursor: not-allowed; }
+.alerta.erro { background: #fdecea; border-left-color: var(--erro); }
+.alerta.info { background: #e6fffa; border-left-color: var(--primaria); }
+.pergunta { font-size: 1.1rem; white-space: pre-line; }
+.recusa { margin-top: 1rem; }
+details.autor { margin-top: 2rem; background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: .6rem 1rem; }
+form.campos label { display: block; margin: .6rem 0; }
+form.campos input[type=text], form.campos textarea, form.campos select { width: 100%; padding: .4rem; }

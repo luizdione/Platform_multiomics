@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ t('novo_subprojeto', lang) }}{% endblock %}
+{% block conteudo %}
+{% include "_migalhas.html" %}
+<h1>{{ t('novo_subprojeto', lang) }}</h1>
+<p class="meta">{{ t('novo_sub_explica', lang) }} {{ t('novo_sub_privado', lang) }}</p>
+{% if not permitir %}
+<p class="alerta" data-motivo="rascunho_desligado">⚠️ {{ t('rascunho_desligado', lang) }}</p>
+{% elif not autorizado %}
+<p class="alerta" data-motivo="rascunho_sem_autorizacao">⚠️ {{ t('rascunho_sem_autorizacao', lang) }}</p>
+{% endif %}
+{% if erro %}
+<p class="alerta erro" id="erro-rascunho" data-erro="{{ erro }}">⛔ {{ t('rascunho_erro_' + erro, lang) }}{% if erro_detalhe %} <span class="meta">({{ erro_detalhe }})</span>{% endif %}</p>
+{% endif %}
+
+<form method="post" action="/e/{{ esp.id }}/novo-subprojeto" enctype="multipart/form-data" class="campos">
+  <fieldset {% if not (permitir and autorizado) %}disabled{% endif %} style="border:0;padding:0">
+    <label>{{ t('campo_slug', lang) }}
+      <input type="text" name="slug" value="{{ valores.slug }}" maxlength="48" required></label>
+    <label>{{ t('campo_titulo', lang) }}
+      <input type="text" name="titulo" value="{{ valores.titulo }}" maxlength="200" required></label>
+    <label>{{ t('campo_pergunta', lang) }}
+      <textarea name="pergunta" rows="4" maxlength="2000" required>{{ valores.pergunta }}</textarea></label>
+    <label>{{ t('campo_assembly', lang) }}
+      <select name="assembly">
+        {% for a in esp.assemblies %}<option value="{{ a }}"{% if a == valores.assembly %} selected{% endif %}>{{ a }}</option>{% endfor %}
+      </select></label>
+    <label>{{ t('campo_amostras', lang) }}
+      <input type="file" name="amostras" accept=".tsv,.txt,text/tab-separated-values"></label>
+    <button type="submit">{{ t('criar_rascunho', lang) }}</button>
+  </fieldset>
+</form>
+{% endblock %}

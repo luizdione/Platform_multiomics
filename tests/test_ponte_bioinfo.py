@@ -182,7 +182,8 @@ def test_todo_modulo_declara_dominios_que_a_biblioteca_tem():
 
 
 def test_pagina_do_modulo_aponta_para_as_skills_relacionadas():
-    r = _client().get("/modulos/genomica")
+    # v2: a página do módulo vive no subprojeto demo (a URL v1 só faz 307 para cá)
+    r = _client().get("/e/bos_taurus/demo/modulos/genomica", follow_redirects=False)
     assert r.status_code == 200
     assert "/skills?dominio=variants-popgen" in r.text
     assert "Skills relacionadas na biblioteca" in r.text
@@ -204,7 +205,8 @@ def test_pagina_da_skill_avisa_quando_a_plataforma_ja_cobre(tmp_path, monkeypatc
     # front-matter não vaza como texto cru; a descrição completa aparece
     assert "Descrição completa da receita." in r.text and "name: nome-interno" not in r.text
     assert "/skills?dominio=rnaseq-bulk" in r.text      # volta para o domínio, não para /ajuda
-    assert "/modulos/transcriptomica" in r.text         # análise validada neste domínio
+    # análise validada neste domínio: a URL canônica INTEIRA (a v1 /modulos/... passaria por substring)
+    assert 'href="/e/bos_taurus/demo/modulos/transcriptomica?lang=pt"' in r.text
 
 
 # ---------------------------------------------------------------- reindex: cópia do glossário

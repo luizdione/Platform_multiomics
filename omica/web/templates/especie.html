@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ esp.nome_exibido if lang == 'pt' else esp.nome_exibido_en }}{% endblock %}
+{% block conteudo %}
+{% include "_migalhas.html" %}
+<h1>{{ esp.nome_exibido if lang == 'pt' else esp.nome_exibido_en }}</h1>
+<p><em>{{ esp.nome_cientifico }}</em> · {{ t('assembly', lang) }} <code>{{ esp.assembly_padrao }}</code> ·
+  <span class="badge estado-{{ estado.estado }}">{{ t('estado_' + estado.estado, lang) }}</span>
+  {{ estado.presentes }}/{{ estado.total }} {{ t('refs_presentes', lang) }}
+  {% if estado.faltando %}<span class="meta">({{ t('faltando', lang) }}: {% for f in estado.faltando %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %})</span>{% endif %}</p>
+<p class="meta">{{ t('estado_explica_' + estado.estado, lang) }}</p>
+
+{% if erros_subprojetos %}
+<p class="alerta erro" id="erros-de-carga">⚠️ <strong>{{ t('erros_de_carga', lang) }}</strong>
+  {% for chave, msg in erros_subprojetos.items() %}<br><code>{{ chave }}</code>: {{ msg }}{% endfor %}
+</p>
+{% endif %}
+
+<h2>{{ t('subprojetos', lang) }}</h2>
+{% if linhas %}
+<table>
+  <thead><tr><th>{{ t('subprojeto', lang) }}</th><th>{{ t('pergunta', lang) }}</th><th>{{ t('status', lang) }}</th>
+    <th>{{ t('amostras', lang) }}</th><th>{{ t('modulos_habilitados', lang) }}</th></tr></thead>
+  <tbody>
+  {% for l in linhas %}
+  {% set s = l.reg.sub %}
+  <tr data-subprojeto="{{ s.slug }}">
+    <td><a href="/e/{{ esp.id }}/{{ s.slug }}?lang={{ lang }}"><strong>{{ s.titulo }}</strong></a><br>
+      <code>{{ s.slug }}</code> · {{ t('tipo_' + s.tipo, lang) }}
+      {% if s.privado %}<span class="badge privado">🔒 {{ t('privado', lang) }}</span>{% endif %}</td>
+    <td>{{ s.pergunta | truncate(220) }}</td>
+    <td><span class="badge sub-{{ s.status }}">{{ t('status_sub_' + s.status, lang) }}</span></td>
+    <td>{{ l.n_amostras if l.n_amostras is not none else '—' }}</td>
+    <td>{% for m in l.modulos %}{{ m.icone }} {{ m.nome_pt if lang == 'pt' else m.nome_en }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>{{ t('sem_subprojetos', lang) }}</p>
+{% endif %}
+<p class="meta">{% if arquivados %}<a href="/e/{{ esp.id }}?lang={{ lang }}">{{ t('ocultar_arquivados', lang) }}</a>{% else %}<a href="/e/{{ esp.id }}?arquivados=1&lang={{ lang }}">{{ t('mostrar_arquivados', lang) }}</a>{% endif %}</p>
+
+<p>
+  {% if permitir_rascunho and autorizado %}
+  <a class="botao" id="novo-subprojeto" href="/e/{{ esp.id }}/novo-subprojeto?lang={{ lang }}">{{ t('novo_subprojeto', lang) }}</a>
+  <span class="meta">{{ t('novo_sub_explica', lang) }}</span>
+  {% elif permitir_rascunho %}
+  <span class="botao desabilitado" id="novo-subprojeto" aria-disabled="true" data-motivo="rascunho_sem_autorizacao">{{ t('novo_subprojeto', lang) }}</span>
+  <span class="meta">{{ t('rascunho_sem_autorizacao', lang) }}</span>
+  {% else %}
+  <span class="botao desabilitado" id="novo-subprojeto" aria-disabled="true" data-motivo="rascunho_desligado">{{ t('novo_subprojeto', lang) }}</span>
+  <span class="meta">{{ t('rascunho_desligado', lang) }}</span>
+  {% endif %}
+</p>
+
+{# crítica v2, médio 16: privados só para o autor (token da API), também no modo aula #}
+<details class="autor">
+  <summary>{{ t('autor_titulo', lang) }}</summary>
+  <p class="meta">{{ t('autor_explica', lang) }}</p>
+  {% if autorizado %}
+  <p>🔓 {{ t('autor_ok', lang) }}</p>
+  <form method="post" action="/autorizacao">
+    <input type="hidden" name="volta" value="/e/{{ esp.id }}">
+    <input type="hidden" name="token" value="">
+    <button type="submit">{{ t('autor_sair', lang) }}</button>
+  </form>
+  {% elif token_configurado %}
+  <form method="post" action="/autorizacao" class="campos">
+    <input type="hidden" name="volta" value="/e/{{ esp.id }}">
+    <label>{{ t('autor_token', lang) }} <input type="password" name="token" autocomplete="off"></label>
+    <button type="submit">{{ t('autor_entrar', lang) }}</button>
+  </form>
+  {% else %}
+  <p class="meta">{{ t('autor_sem_token', lang) }}</p>
+  {% endif %}
+</details>
+{% endblock %}

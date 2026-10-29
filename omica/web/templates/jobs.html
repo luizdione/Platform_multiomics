@@ -6,13 +6,27 @@
 <p>{{ t('demo_explica', lang) }}</p>
 <form method="post" action="/jobs/demo"><button type="submit">{{ t('rodar_demo', lang) }}</button></form>
 
+{# filtro por contexto (v2): job sem espécie/subprojeto no status.json é de antes da v2 e conta
+   como bos_taurus/demo, onde todo job da v1 rodou #}
+<form method="get" action="/jobs" class="fase" id="filtro-contexto">
+  <input type="hidden" name="lang" value="{{ lang }}">
+  <label>{{ t('especie', lang) }}
+    <select name="especie">
+      <option value="">{{ t('todas_especies', lang) }}</option>
+      {% for e in especies %}<option value="{{ e.id }}"{% if e.id == filtro_especie %} selected{% endif %}>{{ e.nome_exibido if lang == 'pt' else e.nome_exibido_en }}</option>{% endfor %}
+    </select></label>
+  <label>{{ t('subprojeto', lang) }} <input type="text" name="sub" value="{{ filtro_sub }}" maxlength="48" size="24"></label>
+  <button type="submit">{{ t('filtrar', lang) }}</button>
+</form>
+
 {% if jobs %}
 <table>
-  <thead><tr><th>{{ t('job', lang) }}</th><th>{{ t('status', lang) }}</th><th>{{ t('atualizado', lang) }}</th></tr></thead>
+  <thead><tr><th>{{ t('job', lang) }}</th><th>{{ t('contexto', lang) }}</th><th>{{ t('status', lang) }}</th><th>{{ t('atualizado', lang) }}</th></tr></thead>
   <tbody>
     {% for j in jobs %}
     <tr>
       <td><a href="/jobs/{{ j.job_id }}?lang={{ lang }}">{{ j.job_id }}</a></td>
+      <td>{% if j.ctx_oculto %}🔒 {{ t('privado', lang) }}{% elif j.ctx_link %}<a href="/e/{{ j.ctx_especie }}/{{ j.ctx_sub }}?lang={{ lang }}"><code>{{ j.ctx_especie }}/{{ j.ctx_sub }}</code></a>{% else %}<code>{{ j.ctx_especie }}/{{ j.ctx_sub }}</code>{% endif %}</td>
       <td><span class="badge job-{{ j.status }}">{{ t('status_' + j.status, lang) }}</span></td>
       <td>{{ j.updated }}</td>
     </tr>

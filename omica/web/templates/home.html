@@ -6,18 +6,27 @@
   <p>{{ t('subtitulo', lang) }}</p>
 </section>
 
-<h2>{{ t('modulos', lang) }}</h2>
+{# crítica v2, médio 15: espécie ou subprojeto que não carrega não some em silêncio #}
+{% if erros_especies or erros_subprojetos %}
+<p class="alerta erro" id="erros-de-carga">⚠️ <strong>{{ t('erros_de_carga', lang) }}</strong>
+  {% for chave, msg in erros_especies.items() %}<br><code>{{ chave }}</code>: {{ msg }}{% endfor %}
+  {% for chave, msg in erros_subprojetos.items() %}<br><code>{{ chave }}</code>: {{ msg }}{% endfor %}
+</p>
+{% endif %}
+
+{# a 1ª página escolhe a ESPÉCIE (v2): os módulos vêm depois, dentro de um subprojeto #}
+<h2>{{ t('escolha_especie', lang) }}</h2>
+<p class="meta">{{ t('escolha_especie_sub', lang) }}</p>
 <section class="cards">
-  {% for m in registry.modules %}
-  <a class="card" href="/modulos/{{ m.id }}?lang={{ lang }}">
-    <span class="icone">{{ m.icone }}</span>
-    <h3>{{ m.nome_pt if lang == 'pt' else m.nome_en }}</h3>
-    <p>{{ m.descricao_pt if lang == 'pt' else m.descricao_en }}</p>
-    <p class="meta">
-      {{ m.fases | length }} {{ t('fases', lang) }} ·
-      {{ m.fases | map(attribute='etapas') | map('length') | sum }} {{ t('etapas', lang) }}
-      {% if m.em_construcao() %}<span class="badge planejado">{{ t('em_construcao', lang) }}</span>{% endif %}
-    </p>
+  {% for c in cards %}
+  <a class="card" href="/e/{{ c.esp.id }}?lang={{ lang }}" data-especie="{{ c.esp.id }}">
+    <h3>{{ c.esp.nome_exibido if lang == 'pt' else c.esp.nome_exibido_en }}</h3>
+    <p><em>{{ c.esp.nome_cientifico }}</em> · <code>{{ c.esp.assembly_padrao }}</code></p>
+    <p><span class="badge estado-{{ c.estado.estado }}">{{ t('estado_' + c.estado.estado, lang) }}</span>
+      {{ c.estado.presentes }}/{{ c.estado.total }} {{ t('refs_presentes', lang) }}</p>
+    <p class="meta">{{ t('estado_explica_' + c.estado.estado, lang) }}</p>
+    <p class="meta">{{ c.n_sub }} {{ t('n_subprojetos', lang) }} ({{ c.n_exec }} {{ t('n_executaveis', lang) }})</p>
+    <p class="meta">{% for m in c.modulos %}{{ m.icone }} {{ m.nome_pt if lang == 'pt' else m.nome_en }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
   </a>
   {% endfor %}
 </section>

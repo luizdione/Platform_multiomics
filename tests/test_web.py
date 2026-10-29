@@ -12,10 +12,15 @@ def _client():
 
 
 def test_home_em_ptbr():
+    # v2: a 1ª página escolhe a ESPÉCIE (as 3, com o estado da referência), não o módulo
     r = _client().get("/")
     assert r.status_code == 200
     assert "plataforma de ômicas" in r.text
-    assert "Genômica" in r.text and "Epigenômica" in r.text and "Transcriptômica" in r.text
+    for especie in ("homo_sapiens", "mus_musculus", "bos_taurus"):
+        assert f'href="/e/{especie}?lang=pt"' in r.text
+    assert "Humano (Homo sapiens)" in r.text and "Bovinos (Bos taurus / Bos indicus)" in r.text
+    assert r.text.count("badge estado-") == 3 and "sem referência" in r.text
+    assert 'href="/modulos/' not in r.text
 
 
 def test_home_em_en():
@@ -33,9 +38,13 @@ def test_saude_reporta_backend_e_modulos():
 
 
 def test_pagina_de_modulo():
-    r = _client().get("/modulos/genomica")
+    # a URL v1 só redireciona (307, sem seguir aqui); a página vive no subprojeto demo
+    antiga = _client().get("/modulos/genomica", follow_redirects=False)
+    assert antiga.status_code == 307 and antiga.headers["location"] == "/e/bos_taurus/demo/modulos/genomica"
+    r = _client().get("/e/bos_taurus/demo/modulos/genomica", follow_redirects=False)
     assert r.status_code == 200
     assert "SnpEff" in r.text
+    assert 'action="/e/bos_taurus/demo/modulos/genomica/workflows/wf_painel_demo"' in r.text
 
 
 def test_job_demo_ponta_a_ponta(cfg):
@@ -67,9 +76,12 @@ def test_job_demo_ponta_a_ponta(cfg):
 
 
 def test_pagina_modulo_lista_scripts_e_resultados_vazios(cfg):
-    r = _client().get("/modulos/genomica")
+    r = _client().get("/e/bos_taurus/demo/modulos/genomica", follow_redirects=False)
+    assert r.status_code == 200
     assert "Extração por painel (demo BTA14)" in r.text
     assert "▶ Rodar" in r.text
+    assert 'action="/e/bos_taurus/demo/modulos/genomica/scripts/extracao_demo"' in r.text
+    assert 'action="/modulos/' not in r.text
     # sem arquivos de resultado ainda → a UI diz "sem dados", nunca inventa
     assert "nunca inventa número" in r.text
 

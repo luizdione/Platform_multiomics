@@ -17,33 +17,62 @@ Contrato:
   `metodo_nao_permitido`) e exceção não tratada (500 `erro_interno`, sem a mensagem) nos
   handlers de omica/web/app.py, que só valem para este prefixo — a UI HTML não muda.
 - Nenhuma rota aceita caminho livre nem comando: só o que está no catálogo.
+
+v2 multiespécie (M4, ESPEC §6): o run nasce num contexto (espécie, subprojeto). Sem os dois,
+é o `bos_taurus/demo`, com o aviso `contexto_padrao_bos_taurus_demo` — o que o formulário do
+n8n manda hoje. `/catalogo` e `/pipelines` SEM query respondem exatamente como na v1 (nem uma
+chave nova); com `?especie=` (e `&subprojeto=`) filtram pelo contexto e ganham a chave de topo
+`contexto`. `/especies` e `/subprojetos` só leem: o estado das referências e a presença dos
+dados declarados saem de stat no disco, nunca de conteúdo de arquivo. Fora do demo só
+PIPELINES executam (ESPEC §10): nenhuma rota daqui executa `scripts:` nem workflow selado.
 """
 from __future__ import annotations
 
 import re
 import secrets
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Iterable, Optional
+from typing import Annotated, Any, Callable, Coroutine, Iterable, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import Path as ParamDeCaminho
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from omica import __version__, runs
+from omica import __version__, contexto, runs
+from omica import especies as especies_mod
+from omica import subprojetos as subprojetos_mod
+from omica.chaves_contexto import CHAVES_CONTEXTO, ESPECIE_LEGADA, ID_ESPECIE, SLUG, SLUG_DEMO, SLUG_NU
 from omica.config import get_config, token_api
 from omica.jobs import dispatch, queue
 from omica.jobs.guarda_ram import RecusadoPorRAM
 from omica.pipelines import carregar_pipelines, envio_formulario
-from omica.registry import load_registry
+from omica.registry import ScriptSpec, WorkflowSpec, load_registry
 from omica.saude import dados_saude, estado_gpu
 
 # Formato de job_id gerado por queue.novo_job_id: sem ponto nem barra. read_status() monta o
 # caminho direto com o id — validar AQUI é o que impede `../..` de atravessar diretório.
 _ID_JOB = re.compile(r"^[A-Za-z0-9_\-]{1,160}$")
 _MAX_SHA_BYTES = 512 * 1024 * 1024  # acima disso não calcula sha256 na hora
+
+# v2: os MESMOS padrões de omica/chaves_contexto.py, com âncoras — o `pattern` do pydantic e do
+# FastAPI é BUSCA, não fullmatch (no motor Rust, `$` não aceita o '\n' final). Saem de lá para
+# não haver dois padrões que divergem em silêncio.
+_PADRAO_ESPECIE = f"^{ID_ESPECIE.pattern}$"
+_PADRAO_SLUG = f"^{SLUG.pattern}$"
+_QEspecie = Annotated[Optional[str], Query(pattern=_PADRAO_ESPECIE)]
+_QSubprojeto = Annotated[Optional[str], Query(pattern=_PADRAO_SLUG)]
+_PEspecie = Annotated[str, ParamDeCaminho(pattern=_PADRAO_ESPECIE)]
+_PSlug = Annotated[str, ParamDeCaminho(pattern=_PADRAO_SLUG)]
+# Os campos de parâmetro que o /catalogo da v1 devolvia. Sem query a resposta tem de ser a da
+# v1 (crítica v2, médio 4): um campo novo do ParamSpec (o `escopo` da v2) vazava pelo
+# model_dump() — congelar a lista, e não excluir o campo novo, cobre também o próximo.
+_CAMPOS_PARAM_V1 = frozenset({"name", "rotulo", "default", "tipo"})
+# teto de stat por lista de caminhos declarados num subprojeto (o mesmo da página, ESPEC §7)
+_MAX_PRESENCA = 50
 
 
 def exigir_token(authorization: Optional[str] = Header(default=None)) -> None:
@@ -148,6 +177,9 @@ def detalhe_do_contrato(status: int, detail: Any, headers: Optional[dict[str, st
 
 @router.get("/saude")
 def saude() -> dict[str, Any]:
+    # v2 (crítica, médio 15): `erros_especies` e `erros_subprojetos` vêm de dados_saude(), a
+    # MESMA fonte do /saude da página — espécie ou subprojeto que não carrega não morre em
+    # silêncio (tests/test_api_v1_contexto.py confere pela API).
     from omica.selos import conferir
 
     return {
@@ -157,38 +189,270 @@ def saude() -> dict[str, Any]:
     }
 
 
+# ------------------------------------------------------------- contexto (v2, M4)
+def _recusa(e: contexto.ContextoRecusado) -> HTTPException:
+    return HTTPException(e.status, detail={"erro": e.erro, **e.detalhe})
+
+
+def _especie_inexistente(cat: contexto.Catalogo, especie: str) -> HTTPException:
+    """404 no formato do resolver. Se o YAML da espécie existe e não carregou, diz por quê:
+    "não existe" e "existe e está quebrada" não são o mesmo problema."""
+    detalhe: dict[str, Any] = {"erro": "especie_inexistente", "especie": especie}
+    carga = cat.erros_especies.get(f"{especie}.yaml")
+    if carga:
+        detalhe["erro_de_carga"] = carga
+    return HTTPException(404, detail=detalhe)
+
+
+@dataclass(frozen=True)
+class _Filtro:
+    """O contexto pedido na query de /catalogo e /pipelines. `ctx` só com o subprojeto."""
+    cat: contexto.Catalogo
+    especie: especies_mod.Especie
+    reg: Optional[subprojetos_mod.Registro] = None
+    ctx: Optional[contexto.Contexto] = None
+
+    def bloco(self) -> dict[str, Any]:
+        """A chave de topo `contexto`. `execucao` diz o que pode rodar ali: "demo" (scripts,
+        workflows selados e pipelines) ou "so_pipelines"; sem subprojeto, None."""
+        if self.ctx is None:
+            return {"especie": self.especie.id, "subprojeto": None, "execucao": None}
+        return {"especie": self.ctx.especie, "subprojeto": self.ctx.slug,
+                "execucao": "demo" if self.ctx.eh_demo else "so_pipelines"}
+
+    @property
+    def chave_execucao(self) -> str:
+        """Com subprojeto, `executavel` (ali). Só com a espécie, `executavel_no_demo`: scripts e
+        workflows selados só rodam em bos_taurus/demo, e "executavel" sem subprojeto seria
+        ambíguo (crítica v2)."""
+        return "executavel" if self.ctx is not None else "executavel_no_demo"
+
+    def _alvo(self) -> Optional[tuple[str, str]]:
+        """Onde a execução é perguntada: o subprojeto pedido; sem ele, o demo — que só a espécie
+        legada tem (as outras não executam script nem workflow em lugar nenhum)."""
+        if self.ctx is not None:
+            return self.ctx.especie, self.ctx.slug
+        return (ESPECIE_LEGADA, SLUG_DEMO) if self.especie.id == ESPECIE_LEGADA else None
+
+    def executa_script(self, s: ScriptSpec) -> bool:
+        """contexto.execucao_permitida, a MESMA regra (e precedência) do POST da web e do
+        dispatch: o catálogo nunca promete o que o POST recusa. Mais a espécie declarada no
+        spec, que o dispatch.montar_cmd exige."""
+        alvo = self._alvo()
+        return (alvo is not None and alvo[0] in s.especies
+                and contexto.execucao_permitida(*alvo, "script", cat=self.cat)[0])
+
+    def executa_workflow(self, w: WorkflowSpec) -> bool:
+        """Idem, com `validado_em` — e fora do demo nenhum workflow selado roda, mesmo que um dia
+        declare o subprojeto (so_pipelines_fora_do_demo vem antes na precedência)."""
+        alvo = self._alvo()
+        return alvo is not None and contexto.execucao_permitida(*alvo, "workflow", workflow=w, cat=self.cat)[0]
+
+
+def _filtro(especie: Optional[str], subprojeto: Optional[str]) -> Optional[_Filtro]:
+    """None = sem query: a rota responde exatamente como na v1, sem nem carregar o catálogo de
+    espécies (um YAML de espécie quebrado não muda a resposta da v1). Só `subprojeto` é 422
+    `contexto_incompleto`, como no POST /runs; o resto das recusas sai do resolver, com o
+    código de STATUS_DA_RECUSA."""
+    if especie is None and subprojeto is None:
+        return None
+    if especie is None:
+        raise HTTPException(422, detail={"erro": "contexto_incompleto", "especie": None,
+                                         "subprojeto": subprojeto})
+    cat = contexto.catalogo()
+    esp = cat.especies.get(especie)
+    if esp is None:
+        raise _especie_inexistente(cat, especie)
+    if subprojeto is None:
+        return _Filtro(cat, esp)
+    try:
+        ctx = contexto.resolver(especie, subprojeto, cat=cat)
+    except contexto.ContextoRecusado as e:
+        raise _recusa(e) from None
+    return _Filtro(cat, esp, cat.subprojetos[ctx.id], ctx)
+
+
 @router.get("/catalogo")
-def catalogo() -> dict[str, Any]:
+def catalogo(especie: _QEspecie = None, subprojeto: _QSubprojeto = None) -> dict[str, Any]:
     """Tudo o que um orquestrador precisa para montar um passo, sem ler YAML: params com
     default e tipo, fila, RAM, entradas/saídas declaradas e o estado do selo. (O
-    `professor.catalogo()` omite params, defaults e mem_gb — serve ao LLM, não a isto.)"""
+    `professor.catalogo()` omite params, defaults e mem_gb — serve ao LLM, não a isto.)
+
+    Sem query: a resposta da v1, chave por chave. Com contexto (ESPEC §6):
+    - `?especie=`: só os módulos da espécie; cada script e workflow com `executavel_no_demo`
+      (scripts e workflows selados só rodam em bos_taurus/demo — "executavel" sem subprojeto
+      seria ambíguo, crítica v2);
+    - `?especie=&subprojeto=`: os módulos habilitados no subprojeto; fora do demo `scripts: []`
+      e cada workflow com `executavel`;
+    - nos dois, o veredito sai de contexto.execucao_permitida (a regra do POST da web e do
+      dispatch); os params trazem também `escopo`, os workflows `validado_em`, e o topo ganha
+      `contexto`."""
     from omica.selos import conferir
 
+    f = _filtro(especie, subprojeto)
     selos = {(s["modulo"], s["workflow"]): s for s in conferir()}
+    reg = load_registry()
+    if f is None:
+        mods = list(reg.modules)
+    elif f.reg is None:
+        mods = [m for m in reg.modules if m.id in f.especie.modulos]
+    else:
+        habilitados = contexto.modulos_habilitados(f.reg, f.cat)
+        mods = [m for m in (reg.por_id(i) for i in habilitados) if m is not None]
+    so_pipelines = f is not None and f.ctx is not None and not f.ctx.eh_demo
     modulos = []
-    for m in load_registry().modules:
+    for m in mods:
         scripts = []
-        for s in m.scripts:
+        for s in ([] if so_pipelines else m.scripts):
             try:
                 fila = dispatch.fila_para_runtime(s.runtime)
             except dispatch.RuntimeIndisponivel:
                 fila = None
-            scripts.append({
+            item: dict[str, Any] = {
                 "key": s.key, "titulo": s.titulo, "descricao": s.descricao,
                 "runtime": s.runtime, "fila": fila, "mem_gb": s.mem_gb, "cpus": s.cpus,
                 "tempo_estimado": s.tempo_estimado,
-                "params": [p.model_dump() for p in s.params],
+                "params": [p.model_dump() if f is not None else p.model_dump(include=_CAMPOS_PARAM_V1)
+                           for p in s.params],
                 "inputs": s.inputs, "outputs": s.outputs,
-            })
+            }
+            if f is not None:
+                item[f.chave_execucao] = f.executa_script(s)
+            scripts.append(item)
         workflows = []
         for w in m.workflows:
             selo = selos.get((m.id, w.id))
-            workflows.append({
+            item = {
                 "id": w.id, "titulo": w.titulo, "passos": w.passos, "testado_em": w.testado_em,
                 "selo_vigente": None if selo is None else not selo["vencido"],
-            })
+            }
+            if f is not None:
+                item["validado_em"] = list(w.validado_em)
+                item[f.chave_execucao] = f.executa_workflow(w)
+            workflows.append(item)
         modulos.append({"id": m.id, "nome": m.nome_pt, "scripts": scripts, "workflows": workflows})
-    return {"versao": __version__, "modulos": modulos}
+    corpo: dict[str, Any] = {"versao": __version__, "modulos": modulos}
+    if f is not None:
+        corpo["contexto"] = f.bloco()
+    return corpo
+
+
+# ------------------------------------------------------------- espécies (v2, M4)
+def _presente(valor: str) -> Optional[bool]:
+    """O caminho declarado existe? Só stat (nunca abre o arquivo) e só na forma que
+    `especies.no_disco` aceita (/data/..., modules/..., projetos/...). Outra forma é None,
+    nunca um caminho do host: sem isso a API vira oráculo de existência de arquivo (crítica
+    v2, médio 10c)."""
+    try:
+        return especies_mod.no_disco(valor).exists()
+    except (ValueError, OSError):
+        return None
+
+
+def _erros_da_especie(erros: dict[str, str], especie: str) -> dict[str, str]:
+    """Os erros de carga cujo rótulo ("<origem>:<esp>/<slug>" ou "<origem>:<esp>") é da espécie."""
+    return {k: v for k, v in erros.items() if k.partition(":")[2].split("/", 1)[0] == especie}
+
+
+def _item_especie(e: especies_mod.Especie, est: especies_mod.EstadoEspecie,
+                  cat: contexto.Catalogo) -> dict[str, Any]:
+    subs = contexto.listar_subprojetos(e.id, cat=cat)  # sem os arquivados, como a 1ª página
+    return {"id": e.id, "nome_cientifico": e.nome_cientifico, "nome_exibido": e.nome_exibido,
+            "nome_exibido_en": e.nome_exibido_en, "taxon_ids": list(e.taxon_ids), "ordem": e.ordem,
+            "assembly_padrao": e.assembly_padrao, "assemblies": list(e.assemblies),
+            "modulos": list(e.modulos), "estado": est.estado, "refs_presentes": est.presentes,
+            "refs_total": est.total, "n_subprojetos": len(subs),
+            "n_executaveis": sum(1 for r in subs if r.sub.executavel)}
+
+
+@router.get("/especies")
+def especies() -> dict[str, Any]:
+    """As espécies na ordem da 1ª página, mesmo sem referência (o estado é calculado por stat).
+    `erros`: YAML de espécie que não carregou, por arquivo."""
+    cat = contexto.catalogo()
+    return {"especies": [_item_especie(e, especies_mod.estado(e), cat) for e in contexto.listar_especies(cat)],
+            "erros": dict(cat.erros_especies)}
+
+
+@router.get("/especies/{especie}")
+def ver_especie(especie: _PEspecie) -> dict[str, Any]:
+    """O item de /especies mais `refs` por assembly — `{chave: {"valor", "presente"}}`, com
+    `presente` só para caminho/dir (texto e inteiro não são arquivo: None) —, `recursos`,
+    `faltando` (da assembly padrão) e os erros de carga dos subprojetos desta espécie."""
+    cat = contexto.catalogo()
+    e = cat.especies.get(especie)
+    if e is None:
+        raise _especie_inexistente(cat, especie)
+    est = especies_mod.estado(e)
+    refs = {nome: {k: {"valor": v,
+                       "presente": _presente(v) if CHAVES_CONTEXTO[f"ref_{k}"] in ("caminho", "dir") else None}
+                   for k, v in asm.refs.items()}
+            for nome, asm in e.assemblies.items()}
+    return {**_item_especie(e, est, cat), "refs": refs, "recursos": dict(e.recursos),
+            "faltando": list(est.faltando), "erros_subprojetos": _erros_da_especie(cat.erros_subprojetos, e.id)}
+
+
+# ----------------------------------------------------------- subprojetos (v2, M4)
+def _item_subprojeto(reg: subprojetos_mod.Registro) -> dict[str, Any]:
+    s = reg.sub
+    return {"id": s.id, "especie": s.especie, "slug": s.slug, "titulo": s.titulo, "tipo": s.tipo,
+            "status": s.status, "executavel": s.executavel, "assembly": s.assembly,
+            "modulos": list(s.modulos), "pipelines": list(s.pipelines), "origem": reg.origem,
+            "privado": s.privado}
+
+
+def _presencas(caminhos: Iterable[str]) -> list[Optional[bool]]:
+    """`_presente` dos primeiros _MAX_PRESENCA; dali em diante None (não conferido)."""
+    return [_presente(c) if i < _MAX_PRESENCA else None for i, c in enumerate(caminhos)]
+
+
+@router.get("/subprojetos")
+def subprojetos(especie: _QEspecie = None, arquivados: bool = False) -> dict[str, Any]:
+    """Os subprojetos (da espécie, se pedida), o demo primeiro e depois por título; os
+    arquivados só com `?arquivados=true`. `erros`: subprojetos que não carregaram."""
+    cat = contexto.catalogo()
+    if especie is not None and especie not in cat.especies:
+        raise _especie_inexistente(cat, especie)
+    alvo = [cat.especies[especie]] if especie is not None else contexto.listar_especies(cat)
+    itens = [_item_subprojeto(r) for e in alvo
+             for r in contexto.listar_subprojetos(e.id, incluir_arquivados=arquivados, cat=cat)]
+    erros = dict(cat.erros_subprojetos) if especie is None else _erros_da_especie(cat.erros_subprojetos, especie)
+    return {"subprojetos": itens, "erros": erros}
+
+
+@router.get("/subprojetos/{especie}/{slug}")
+def ver_subprojeto(especie: _PEspecie, slug: _PSlug) -> dict[str, Any]:
+    """O item de /subprojetos mais a pergunta, a validade, os avisos, os contrastes, o número
+    de amostras, `datasets`/`dados_legados` com `presente` (só stat) e `contexto_sha256` — o
+    sha que o plano de um run aqui vai carregar; None, com `motivo`, se não executável.
+
+    Slug nu (`sub03`): 404 sempre. As numerações das plataformas antigas colidem entre si
+    (genomes × epigenoma) e nunca são id — nem por alias."""
+    cat = contexto.catalogo()
+    if especie not in cat.especies:
+        raise _especie_inexistente(cat, especie)
+    reg = None if SLUG_NU.fullmatch(slug) else contexto.obter_subprojeto(especie, slug, cat=cat)
+    if reg is None:
+        raise HTTPException(404, detail={"erro": "subprojeto_inexistente", "subprojeto": f"{especie}/{slug}"})
+    s = reg.sub
+    try:
+        sha: Optional[str] = contexto.resolver(especie, slug, cat=cat).sha256
+        motivo: Optional[str] = None
+    except contexto.ContextoRecusado as e:
+        sha, motivo = None, e.erro
+    nomes = list(s.datasets)
+    pres_ds = _presencas(s.datasets[n] for n in nomes)
+    return {
+        **_item_subprojeto(reg),
+        "pergunta": s.pergunta, "validade": s.validade, "substituido_por": s.substituido_por,
+        "avisos": list(s.avisos), "proveniencia_rotulos": s.proveniencia_rotulos, "legado": list(s.legado),
+        "contrastes": [c.model_dump() for c in s.contrastes],
+        "n_amostras": subprojetos_mod.n_amostras(reg),
+        "datasets": {n: {"valor": s.datasets[n], "presente": p} for n, p in zip(nomes, pres_ds)},
+        "dados_legados": [{"valor": c, "presente": p}
+                          for c, p in zip(s.dados_legados, _presencas(s.dados_legados))],
+        "contexto_sha256": sha, "motivo": motivo,
+    }
 
 
 def _sha256(caminho: Path) -> Optional[str]:
@@ -275,26 +539,50 @@ def _http(e: runs.ErroRun) -> HTTPException:
 
 
 @router.get("/pipelines")
-def pipelines() -> dict[str, Any]:
+def pipelines(especie: _QEspecie = None, subprojeto: _QSubprojeto = None) -> dict[str, Any]:
     """Catálogo para o orquestrador. Por entrada, além do contrato (`modos` incluso), `envio`:
     "arquivo" (upload cru) ou "caminho" (`{"caminho"}` de um arquivo no servidor — formato com
     índice obrigatório ou entrada que aceita referência). Vem de `pipelines.envio_formulario`,
-    a MESMA função que o builder do n8n usa para o tipo do campo do formulário (G1 §1.1)."""
+    a MESMA função que o builder do n8n usa para o tipo do campo do formulário (G1 §1.1).
+
+    Sem query: a resposta da v1, sem chave nova. Com contexto (ESPEC §6), cada item ganha
+    `especies` e o topo, `contexto`:
+    - `?especie=`: os pipelines da espécie (em `p.especies`) de módulo da espécie — os outros
+      não rodariam em subprojeto nenhum dela;
+    - `?especie=&subprojeto=`: `contexto.pipelines_do_subprojeto`, a MESMA regra que o
+      POST /runs aplica (execucao_permitida): o que está listado aqui é o que o run aceita."""
+    f = _filtro(especie, subprojeto)
     validos, erros = carregar_pipelines()
-    return {
-        "pipelines": [{"id": p.id, "modulo": p.modulo, "titulo": p.titulo, "descricao": p.descricao,
-                       "entradas": {n: {**e.model_dump(), "envio": envio_formulario(e)}
-                                    for n, e in p.entradas.items()},
-                       "escolhas": {n: e.model_dump() for n, e in p.escolhas_autor.items()},
-                       "passos": [x.id for x in p.passos], "selo": p.selo_pipeline.model_dump()}
-                      for p in validos.values()],
-        "erros": erros,
-    }
+    if f is None:
+        lista = list(validos.values())
+    elif f.reg is None:
+        lista = [p for p in validos.values() if f.especie.id in p.especies and p.modulo in f.especie.modulos]
+    else:
+        lista = contexto.pipelines_do_subprojeto(f.reg, cat=f.cat)
+    itens = []
+    for p in lista:
+        item = {"id": p.id, "modulo": p.modulo, "titulo": p.titulo, "descricao": p.descricao,
+                "entradas": {n: {**e.model_dump(), "envio": envio_formulario(e)}
+                             for n, e in p.entradas.items()},
+                "escolhas": {n: e.model_dump() for n, e in p.escolhas_autor.items()},
+                "passos": [x.id for x in p.passos], "selo": p.selo_pipeline.model_dump()}
+        if f is not None:
+            item["especies"] = list(p.especies)
+        itens.append(item)
+    corpo: dict[str, Any] = {"pipelines": itens, "erros": erros}
+    if f is not None:
+        corpo["contexto"] = f.bloco()
+    return corpo
 
 
 class _NovoRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pipeline: str
+    # v2: o contexto do run. Os dois ou nenhum (nenhum = bos_taurus/demo, com aviso). Só um dos
+    # dois é 422 `contexto_incompleto`, decidido por runs.criar (o mesmo para quem chama o
+    # núcleo sem passar por aqui).
+    especie: Optional[str] = Field(default=None, pattern=_PADRAO_ESPECIE)
+    subprojeto: Optional[str] = Field(default=None, pattern=_PADRAO_SLUG)
 
 
 class _Plano(BaseModel):
@@ -315,7 +603,10 @@ class _EntradaPorCaminho(BaseModel):
 @router.post("/runs", status_code=201)
 def novo_run(corpo: _NovoRun) -> dict[str, Any]:
     try:
-        return runs.criar(corpo.pipeline)
+        if corpo.especie is None and corpo.subprojeto is None:
+            # a chamada da v1, literal (o formulário do n8n): o núcleo põe o demo e o aviso
+            return runs.criar(corpo.pipeline)
+        return runs.criar(corpo.pipeline, corpo.especie, corpo.subprojeto)
     except runs.ErroRun as e:
         raise _http(e) from None
 

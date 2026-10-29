@@ -1,16 +1,37 @@
 {% extends "base.html" %}
 {% block titulo %}ômica — {{ m.nome_pt if lang == 'pt' else m.nome_en }}{% endblock %}
 {% block conteudo %}
-<a class="voltar" href="/?lang={{ lang }}">{{ t('voltar', lang) }}</a>
+{% include "_migalhas.html" %}
+<a class="voltar" href="{{ base }}?lang={{ lang }}">{{ t('voltar', lang) }}</a>
 <h1>{{ m.icone }} {{ m.nome_pt if lang == 'pt' else m.nome_en }}</h1>
 <p>{{ m.descricao_pt if lang == 'pt' else m.descricao_en }}</p>
 {% if aviso %}<p class="alerta">⚠️ {{ aviso }}</p>{% endif %}
+{% if not sub.executavel %}<p class="alerta erro" data-motivo="subprojeto_nao_executavel">⛔ {{ t('sub_bloqueado', lang) }}</p>{% endif %}
+{# avisos do subprojeto que começam pelo nome deste módulo (ex.: "epigenômica: painel 108 v1…") #}
+{% for a in avisos_modulo %}<p class="alerta">⚠️ {{ a }}</p>{% endfor %}
 
 {% if fluxo_svg %}
 <section class="fase">
   <h2>{{ t('fluxograma', lang) }}</h2>
   <div style="overflow-x:auto">{{ fluxo_svg | safe }}</div>
 </section>
+{% endif %}
+
+{# Fora de bos_taurus/demo só PIPELINES executam (ESPEC §10): nenhum <form> de script ou
+   workflow é desenhado; a rota POST recusa de novo (409) se alguém montar o pedido à mão. #}
+{% if pipelines %}
+<h2>🧪 {{ t('pipelines_disponiveis', lang) }}</h2>
+<section class="cards">
+  {% for p in pipelines %}
+  <div class="card" data-pipeline="{{ p.id }}">
+    <h3>{{ p.titulo }}</h3>
+    <p>{{ p.descricao }}</p>
+    <p class="meta"><code>{{ p.id }}</code> · {{ p.passos | length }} {{ t('passos', lang) }}:
+      {% for ps in p.passos %}<code>{{ ps.id }}</code>{% if not loop.last %} → {% endif %}{% endfor %}</p>
+  </div>
+  {% endfor %}
+</section>
+<p class="meta">{{ t('como_executar_pipeline', lang) }}</p>
 {% endif %}
 
 {% if m.workflows %}
@@ -23,9 +44,13 @@
     <p class="meta">{{ wf.passos | length }} {{ t('passos', lang) }}:
       {% for p in wf.passos %}<code>{{ p }}</code>{% if not loop.last %} → {% endif %}{% endfor %}</p>
     {% if wf.testado_em %}<p class="meta">✅ {{ t('testado_em', lang) }} {{ wf.testado_em }}{% if wf.testado_por %} — {{ wf.testado_por }}{% endif %}</p>{% endif %}
-    <form method="post" action="/modulos/{{ m.id }}/workflows/{{ wf.id }}">
+    {% if wf_pode.get(wf.id) %}
+    <form method="post" action="{{ base }}/modulos/{{ m.id }}/workflows/{{ wf.id }}">
       <button type="submit">{{ t('rodar', lang) }} workflow</button>
     </form>
+    {% else %}
+    <p class="meta" data-selado-so-demo="{{ wf.id }}">🔒 {{ t('selado_so_demo', lang) }} — <a href="{{ demo_url }}/modulos/{{ m.id }}?lang={{ lang }}">{{ t('ver_no_demo', lang) }}</a></p>
+    {% endif %}
   </div>
   {% endfor %}
 </section>
@@ -50,7 +75,7 @@
 </section>
 {% endfor %}
 
-{% if m.scripts %}
+{% if m.scripts and pode_script %}
 <h2>{{ t('scripts_modulo', lang) }}</h2>
 <section class="cards">
   {% for spec in m.scripts %}
@@ -61,7 +86,7 @@
       <code>{{ spec.runtime }}</code> · {{ spec.mem_gb }} GB ·
       {{ spec.tempo_estimado or '—' }}
     </p>
-    <form method="post" action="/modulos/{{ m.id }}/scripts/{{ spec.key }}">
+    <form method="post" action="{{ base }}/modulos/{{ m.id }}/scripts/{{ spec.key }}">
       {% for param in spec.params %}
       <p class="meta"><label>{{ param.rotulo }}<br>
         <input type="text" name="{{ param.name }}" value="{{ param.default }}" style="width:100%">
@@ -72,6 +97,9 @@
   </div>
   {% endfor %}
 </section>
+{% elif m.scripts and motivo_script == 'so_pipelines_fora_do_demo' %}
+<p class="alerta info" data-motivo="so_pipelines_fora_do_demo">ℹ️ <strong>{{ t('so_pipelines_titulo', lang) }}.</strong> {{ t('so_pipelines_explica', lang) }}
+  <a href="{{ demo_url }}/modulos/{{ m.id }}?lang={{ lang }}">{{ t('ver_no_demo', lang) }}</a></p>
 {% endif %}
 
 {% if skills_modulo %}
@@ -82,7 +110,10 @@
 </section>
 {% endif %}
 
-{% if m.results_spec %}
+{# Resultados do disco: no demo, os de results_spec (results/<mod>/demo…, os que sustentam os
+   selos). Fora dele, NUNCA results_spec — seria o resultado de OUTRO subprojeto —, só os runs
+   deste subprojeto neste módulo. #}
+{% if em_demo and m.results_spec %}
 <h2>{{ t('resultados_modulo', lang) }}</h2>
 {% for rotulo, tipo, dados in resultados %}
 <section class="fase">
@@ -112,5 +143,21 @@
   {% endif %}
 </section>
 {% endfor %}
+{% elif not em_demo %}
+<h2>{{ t('resultados_dos_runs', lang) }}</h2>
+{% if runs_modulo %}
+<table>
+  <thead><tr><th>{{ t('run', lang) }}</th><th>Pipeline</th><th>{{ t('estado', lang) }}</th><th>{{ t('criado_em', lang) }}</th><th>{{ t('relatorio', lang) }}</th></tr></thead>
+  <tbody>
+    {% for r in runs_modulo %}
+    <tr><td><code>{{ r.run_id }}</code></td><td><code>{{ r.pipeline }}</code></td><td>{{ r.estado }}</td>
+      <td>{{ r.criado_em | data_hora }}</td>
+      <td>{% if r.tem_relatorio %}<a href="/relatorios/{{ r.run_id }}/">📄 {{ t('relatorio', lang) }}</a>{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="meta">{{ t('sem_runs', lang) }}</p>
+{% endif %}
 {% endif %}
 {% endblock %}

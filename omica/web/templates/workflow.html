@@ -2,7 +2,7 @@
 {% block titulo %}ômica — workflow {{ run.workflow }}{% endblock %}
 {% block conteudo %}
 {% if ativo %}<meta http-equiv="refresh" content="4">{% endif %}
-<a class="voltar" href="/modulos/{{ run.modulo }}?lang={{ lang }}">{{ t('voltar', lang) }}</a>
+<a class="voltar" href="{{ demo_url }}/modulos/{{ run.modulo }}?lang={{ lang }}">{{ t('voltar', lang) }}</a>
 <h1>🔗 {{ run.titulo }}</h1>
 <p>
   <span class="badge job-{{ 'running' if run.status == 'queued' else run.status }}">{{ t('status_' + run.status, lang) }}</span>

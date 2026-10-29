@@ -4,6 +4,50 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERS
 
 ## [Unreleased] · Integração com o n8n (fases F0–F2 do plano de 2026-10-18)
 
+### v2 multiespécie / multiprojeto (M0, M1, M3, M4 e M5 — 2026-10-29)
+Separável do resto do [Unreleased]: se a 1.1.0 sair só com o n8n, este bloco vai para a 2.0.0.
+
+#### ⚠️ Mudanças de comportamento
+- **A 1ª página escolhe a espécie** (Humano, Camundongo, Bovinos) e o contexto vive na URL:
+  `/e/<espécie>/<subprojeto>/modulos/<módulo>`. As rotas da v1 (`/modulos/...`,
+  `/workflows/...`) respondem **307** para `bos_taurus/demo`, com a query (`?lang=en`).
+- **Fora de `bos_taurus/demo` só PIPELINES executam.** Script avulso ou workflow selado em
+  outro subprojeto → **409** `so_pipelines_fora_do_demo` (UI, plugin e API, o mesmo código).
+- **`POST /api/v1/runs`** aceita `especie` + `subprojeto` (os dois ou nenhum). Nenhum = a
+  chamada da v1: cai em `bos_taurus/demo` com o aviso `contexto_padrao_bos_taurus_demo` (o
+  `n8n/dist` não mudou). O plano leva `contexto` com `sha256`; mudar a referência, o
+  `amostras.tsv`/painel ou um campo do subprojeto entre o plano e a aprovação/execução dá
+  **409** `contexto_mudou` (comentários dos YAMLs não derrubam).
+- Resultados de run fora do demo em `results/projetos/<espécie>/<slug>/<módulo>/runs/<run>/`.
+- **Manifests com `extra="forbid"`**: chave desconhecida reprova o load (`python -m omica
+  selos` sai com 1 e não regrava nada). Campos novos, fora do hash dos selos:
+  `ScriptSpec.especies` / `requer_refs`, `ParamSpec.escopo`, `WorkflowSpec.validado_em`,
+  `Pipeline.especies`. Os 5 selos e os 28 cmds do demo (golden) continuam byte a byte.
+- Genômica (`scripts_api` `painel_bed` e `snpeff`): GTF e banco SnpEff vêm do contexto
+  (`ref_gtf`, `ref_snpeff_db`, `ref_snpeff_datadir`); no demo, os mesmos literais de antes.
+- **Subprojetos privados** (`E:\data\omica\projetos`, fora do git) só aparecem com a
+  autorização do autor (token da API, guardado como cookie HMAC). Falha **fechada**: um
+  privado cujo YAML deixa de carregar continua oculto (job, console, relatório, `/jobs`).
+- **Rascunho pela UI desligado por padrão** (`OMICA_PERMITIR_RASCUNHO=0`); ligado, exige a
+  autorização do autor (sem ela, 403 antes de ler o formulário).
+
+#### Adicionado
+- `especies/*.yaml` (3 espécies; bovinos = 1 espécie, assembly ARS-UCD1.3, estado da
+  referência CALCULADO por stat) e `projetos/bos_taurus/{demo,aula_granulosa_calor}`.
+- `omica/chaves_contexto.py`, `especies.py`, `subprojetos.py`, `contexto.py` (o servidor
+  resolve `ref_*`/`sub_*`/`esp_*`; nada disso vem do formulário).
+- API: `GET /especies`, `/especies/{e}`, `/subprojetos`, `/subprojetos/{e}/{s}`.
+- `python -m omica importar-subprojetos --dry-run --catalogo <yaml>`: confere o catálogo
+  legado contra o disco (só stat) e lista as pendências do autor (título, pergunta, status).
+- Linha de base: `tests/golden/cmd_demo_v1.json` (+ `gerar_golden_v1.py --conferir`) e
+  `tests/test_linha_de_base_v2.py` (5 selos literais + 28 cmds, com canários).
+- `python -m omica selos` não quebra mais no console cp1252 do Windows.
+
+#### Deploy
+- Reiniciar `web` e os 5 workers **sem run ativo** (o worker importa o contexto novo).
+- Nada é gravado em `E:\data\omica\projetos` enquanto o rascunho estiver desligado.
+
+
 ### ⚠️ Mudanças de comportamento — leia antes do `docker compose up`
 - **O `omica-web` passa a escutar só em `127.0.0.1:8710`** (antes `0.0.0.0`: UI sem
   autenticação exposta na rede local). Para aula pela rede, ponha `OMICA_BIND=0.0.0.0` no

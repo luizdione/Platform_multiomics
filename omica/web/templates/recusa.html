@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ t('recusa_titulo', lang) }}{% endblock %}
+{% block conteudo %}
+{# data-motivo e o cabeçalho X-Omica-Recusa levam o MESMO código (omica.contexto.STATUS_DA_RECUSA
+   ou um motivo da própria UI): quem automatiza lê o motivo, não o texto traduzido #}
+<section class="recusa" data-motivo="{{ motivo }}">
+  <h1>⛔ {{ t('recusa_titulo', lang) }}</h1>
+  <p class="alerta erro">{{ t('recusa_' + motivo, lang) }}</p>
+  {% if detalhe %}
+  <table><tbody>{% for k, v in detalhe.items() %}<tr><th>{{ k }}</th><td><code>{{ v }}</code></td></tr>{% endfor %}</tbody></table>
+  {% endif %}
+  <p><a href="{{ volta }}?lang={{ lang }}">{{ t('voltar', lang) }}</a></p>
+</section>
+{% endblock %}

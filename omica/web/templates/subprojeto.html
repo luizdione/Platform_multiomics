@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block titulo %}ômica — {{ sub.titulo }}{% endblock %}
+{% block conteudo %}
+{% include "_migalhas.html" %}
+<h1>{{ sub.titulo }}</h1>
+<p><span class="badge sub-{{ sub.status }}">{{ t('status_sub_' + sub.status, lang) }}</span>
+  · {{ t('tipo', lang) }}: {{ t('tipo_' + sub.tipo, lang) }} · {{ t('assembly', lang) }} <code>{{ sub.assembly }}</code>
+  · <code>{{ sub.id }}</code>
+  {% if em_demo %}· 🔒 {{ t('demo_selado', lang) }}{% endif %}
+  {% if sub.privado %}<span class="badge privado">🔒 {{ t('privado', lang) }}</span>{% endif %}</p>
+
+<section class="fase">
+  <h2>{{ t('pergunta', lang) }}</h2>
+  <p class="alerta info pergunta" id="pergunta">{{ sub.pergunta }}</p>
+</section>
+
+{% if not sub.executavel %}
+<p class="alerta erro" data-motivo="subprojeto_nao_executavel">⛔ {{ t('sub_bloqueado', lang) }}
+  {% if sub.substituido_por %}<br>{{ t('substituido_por', lang) }}: <code>{{ sub.substituido_por }}</code>{% endif %}</p>
+{% endif %}
+
+<table>
+  <tbody>
+    {% if sub.validade %}<tr><th>{{ t('validade', lang) }}</th><td>{{ sub.validade }}</td></tr>{% endif %}
+    {% if sub.proveniencia_rotulos %}<tr><th>{{ t('proveniencia_rotulos', lang) }}</th><td>{{ sub.proveniencia_rotulos }}</td></tr>{% endif %}
+    {% if sub.legado %}<tr><th>{{ t('legado', lang) }}</th><td>{% for a in sub.legado %}<code>{{ a }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>{% endif %}
+  </tbody>
+</table>
+{% if sub.avisos %}
+<section class="fase">
+  <h2>⚠️ {{ t('avisos', lang) }}</h2>
+  {% for a in sub.avisos %}<p class="alerta">{{ a }}</p>{% endfor %}
+</section>
+{% endif %}
+
+<h2>{{ t('modulos_habilitados', lang) }}</h2>
+<section class="cards">
+  {% for m in modulos %}
+  <a class="card" href="/e/{{ esp.id }}/{{ sub.slug }}/modulos/{{ m.id }}?lang={{ lang }}">
+    <span class="icone">{{ m.icone }}</span>
+    <h3>{{ m.nome_pt if lang == 'pt' else m.nome_en }}</h3>
+    <p>{{ m.descricao_pt if lang == 'pt' else m.descricao_en }}</p>
+  </a>
+  {% else %}<p>{{ t('sem_modulos', lang) }}</p>{% endfor %}
+</section>
+
+<h2>🧪 {{ t('pipelines_disponiveis', lang) }}</h2>
+{% if pipelines %}
+<ul>{% for p in pipelines %}<li><code>{{ p.id }}</code> — {{ p.titulo }}{% if p.descricao %} <span class="meta">({{ p.descricao | truncate(160) }})</span>{% endif %}</li>{% endfor %}</ul>
+<p class="meta">{{ t('como_executar_pipeline', lang) }}</p>
+{% if sub.executavel %}<pre class="console" id="como-executar">POST /api/v1/runs
+Authorization: Bearer $OMICA_API_TOKEN
+Content-Type: application/json
+
+{{ exemplo_run }}</pre>{% endif %}
+{% else %}
+<p class="meta">{{ t('sem_pipelines', lang) }}</p>
+{% endif %}
+
+<h2>{{ t('amostras', lang) }}{% if n_amostras is not none %} ({{ n_amostras }}){% endif %}</h2>
+{% if amostras %}
+<table>
+  <thead><tr>{% for c in amostras.colunas %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+  <tbody>{% for l in amostras.linhas %}<tr>{% for v in l %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+</table>
+<p class="meta">{{ t('exibindo', lang) }} {{ amostras.linhas | length }} / {{ n_amostras }}</p>
+{% else %}<p class="meta">{{ t('sem_amostras', lang) }}</p>{% endif %}
+
+{% if sub.contrastes %}
+<h2>{{ t('contrastes', lang) }}</h2>
+<table>
+  <tbody>{% for c in sub.contrastes %}<tr><th><code>{{ c.id }}</code></th><td>{{ t('coluna', lang) }} <code>{{ c.coluna }}</code>: <code>{{ c.a }}</code> × <code>{{ c.b }}</code></td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+
+{% if arquivos %}
+<h2>{{ t('arquivos', lang) }}</h2>
+<p class="meta">{{ t('arquivos_explica', lang) }}{% if arquivos_truncados %} · {{ t('arquivos_truncados', lang) }}{% endif %}</p>
+<table>
+  <tbody>
+    {% for a in arquivos %}
+    <tr><td>{% if a.presente %}✅ {{ t('arquivo_presente', lang) }}{% else %}❌ {{ t('arquivo_ausente', lang) }}{% endif %}</td>
+      <td>{{ t(a.tipo, lang) }}{% if a.nome %} <code>{{ a.nome }}</code>{% endif %}</td>
+      <td><code>{{ a.valor }}</code></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>{{ t('runs_do_subprojeto', lang) }}</h2>
+{% if runs_sub %}
+<table>
+  <thead><tr><th>{{ t('run', lang) }}</th><th>Pipeline</th><th>{{ t('estado', lang) }}</th><th>{{ t('criado_em', lang) }}</th><th>{{ t('relatorio', lang) }}</th></tr></thead>
+  <tbody>
+    {% for r in runs_sub %}
+    <tr><td><code>{{ r.run_id }}</code></td><td><code>{{ r.pipeline }}</code></td><td>{{ r.estado }}</td>
+      <td>{{ r.criado_em | data_hora }}</td>
+      <td>{% if r.tem_relatorio %}<a href="/relatorios/{{ r.run_id }}/">📄 {{ t('relatorio', lang) }}</a>{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="meta">{{ t('sem_runs', lang) }}</p>
+{% endif %}
+{% endblock %}
