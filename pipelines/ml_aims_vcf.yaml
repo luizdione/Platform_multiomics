@@ -1,0 +1,143 @@
+# Pipeline orquestrável (n8n): duas raças por genótipos → CV aninhada, SHAP, painel mínimo,
+# robustez e diagnóstico de empates (ESPEC F6 §3.1.3 + adendo v2 §A8.3).
+#
+# Os passos dataset e classificar rodam os MESMOS scripts do wf_ml_aims selado
+# (ml_dataset_genotipos.py e ml_classificar.py; selo 9563a9c0e7dbc8de); contraste, diagnostico
+# e robustez saem sem selo. Execução LINEAR: o executar de um passo exige o portão aprovado de
+# todos os anteriores.
+#
+# Ordem das classes: a classe A vem primeiro nas colunas da matriz e nos folds
+# (ml_dataset_genotipos.py:63,84), então a ordem muda o resultado. O demo usa Angus e depois
+# Brahman. y = 1 é a classe alfabeticamente MAIOR (ml_classificar.py:86-87), por isso as somas
+# das linhas da confusão conferem contra n_y0/n_y1 do contraste, não contra n_a/n_b (com
+# n_y0 == n_y1 essa conferência não vê nada: ver a nota das invariantes 12-15).
+#
+# Parâmetros: `regiao` é do DADO (escopo subprojeto no manifest; no demo vale o default
+# 14:1-2500000, fora dele o subprojeto declara `parametros: {ml.ml_dataset.regiao: …}` ou o
+# plano dá 422). maf, passo, minimo, k_painel e n_boot são do MÉTODO, fixos e iguais aos do
+# selado (modules/ml/manifest.yaml, seção scripts:); o formulário não os expõe. k tem fonte
+# única: o "=diagnostico.k_painel" de classificar e robustez é resolvido no plano.
+id: ml_aims_vcf
+modulo: ml
+titulo: "Duas raças por genótipos: CV aninhada, SHAP, painel mínimo e robustez"
+descricao: >-
+  VCF/BCF indexado com genótipos e uma tabela amostra→grupo. O autor escolhe as duas classes;
+  a matriz 0/1/2 sai de uma região fixa do BTA14; RF e XGBoost sob CV aninhada, SHAP, painel
+  mínimo, robustez A1/A2/A3 e diagnóstico de empates.
+
+entradas:
+  vcf:
+    formato: vcf_indexado
+    modos: [copia, referencia]
+    rotulo: "VCF.gz ou BCF indexado COM genótipos do BTA14 — caminho no servidor (/data/1000bg_vcf/… ou /data/omica/entradas/…)"
+    exemplo: /data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf
+  rotulos:
+    formato: rotulos_amostras
+    rotulo: "Tabela de rótulos (.tsv com colunas amostra e grupo; ≥10 amostras por grupo)"
+    # derivada por tools/derivar_rotulos_1000bg.py (16 raças do Run 8 com n ≥ 10, 820 amostras)
+    exemplo: modules/ml/data/rotulos_1000bg_racas.tsv
+
+checagens_entrada:
+  # VCF sem genótipo (o demo da genômica só tem sítios) e amostra rotulada fora do cabeçalho
+  # (o dataset a descartaria em silêncio e o n do resumo divergiria da tabela)
+  - {tipo: vcf_e_rotulos, vcf: vcf, rotulos: rotulos}
+
+escolhas_autor:
+  classe_a: {rotulo: "Classe A (vem primeiro nas colunas da matriz)", valores_de: rotulos.grupo}
+  # A == B dava IndexError no ml_classificar; com diferente_de, o plano responde 422 escolhas_iguais
+  classe_b: {rotulo: "Classe B (diferente da A)", valores_de: rotulos.grupo, diferente_de: classe_a}
+
+passos:
+  - id: contraste
+    script: ml_contraste
+    liga: {rotulos: entrada.rotulos, classe_a: escolha.classe_a, classe_b: escolha.classe_b}
+    params: {minimo: "10"}
+  - id: dataset
+    script: ml_dataset
+    liga: {vcf: entrada.vcf, lista_a: contraste.lista_a, lista_b: contraste.lista_b,
+           classe_a: escolha.classe_a, classe_b: escolha.classe_b}
+    # sem `regiao` (adendo §A8.3, crítica M3): fixá-la aqui passaria por cima do subprojeto
+    params: {maf: "0.2", passo: "15"}
+  # logo depois do dataset para falhar cedo; é rápido
+  - {id: diagnostico, script: ml_diagnostico, liga: {matriz: dataset.matriz, rotulos: dataset.rotulos},
+     params: {k_painel: "50"}}
+  - {id: classificar, script: ml_classificar, liga: {matriz: dataset.matriz, rotulos: dataset.rotulos},
+     params: {k_painel: "=diagnostico.k_painel"}}
+  - {id: robustez, script: ml_robustez, liga: {matriz: dataset.matriz, rotulos: dataset.rotulos},
+     params: {k_painel: "=diagnostico.k_painel", n_boot: "100"}}
+
+relatorio:
+  figuras: [classificar.shap_png, robustez.robustez_png]
+  resumos: [contraste.contraste_resumo, dataset.dataset_resumo, diagnostico.diagnostico_resumo,
+            classificar.ml_resumo, robustez.robustez_resumo]
+  tabelas:
+    - {passo: classificar, porta: shap_top, chave: VARIANTE, colunas: [SHAP_MEDIO_ABS], top: {n: 10}}
+    - {passo: robustez, porta: nucleo_estavel, chave: MARCADOR, colunas: [FREQ_BOOTSTRAP, RECORRENCIA_FOLDS], top: {n: 10}}
+  alertas:
+    - fato: diagnostico.diagnostico_resumo.alerta_empate_zero
+      igual: 1
+      # é o XGBoost (o RF deu importância maior que zero a 263 marcadores no demo). Sem dígito: o
+      # redator copia o alerta nas limitações e o R1 do portão reprova número solto.
+      texto: >-
+        O XGBoost deu importância maior que zero a menos marcadores do que o tamanho do painel: no
+        XGBoost, o resto do painel mínimo, e também o núcleo estável e a recorrência entre folds
+        (que usam só o XGBoost), foram preenchidos por empates em importância zero e não medem
+        estabilidade biológica.
+    - fato: diagnostico.diagnostico_resumo.alerta_separador_perfeito
+      igual: 1
+      texto: >-
+        Pelo menos um marcador separa as duas classes sozinho: acurácias no máximo refletem esse
+        marcador, não a força de um painel.
+  # 19 invariantes. Seis são eco de consistência (8-11, 16 e 19): os dois lados saem da mesma
+  # conta do mesmo script e só divergiriam se o próprio script mudasse; ficam marcadas e sem
+  # canário. A falha real que cada uma das outras pega está no docstring de
+  # tests/test_relatorio_ml.py, que tem um canário por invariante que não é eco.
+  # Quando a invariante de k reprova: com menos de 50 marcadores na matriz, o robustez limita k
+  # (ml_robustez.py:65) e o classificar não (ml_classificar.py:61) — reprovam
+  # robustez.k_painel = classificar.k_painel_minimo e a contagem_linhas do shap_top. O
+  # relatório não sai, o que é o resultado honesto.
+  # Fora de propósito: diagnostico.k_painel = classificar.k_painel_minimo (eco do mesmo
+  # parâmetro, nunca reprova; crítica L5); classes.<grupo> (chave dinâmica);
+  # A2_recorrencia.5/5 (o '/' não passa no PLACEHOLDER); recontagem do núcleo contra
+  # A1_nucleo_estavel_n (o núcleo pode passar de k e a tabela corta em k, ml_robustez.py:118).
+  invariantes:
+    - {tipo: soma, partes: [dataset.dataset_resumo.grupo_a.n, dataset.dataset_resumo.grupo_b.n], total: classificar.ml_resumo.n_amostras}
+    - {tipo: igual, a: dataset.dataset_resumo.n_variantes_matriz, b: classificar.ml_resumo.n_variantes}
+    - {tipo: igual, a: contraste.contraste_resumo.n_a, b: dataset.dataset_resumo.grupo_a.n}
+    - {tipo: igual, a: contraste.contraste_resumo.n_b, b: dataset.dataset_resumo.grupo_b.n}
+    - {tipo: igual, a: diagnostico.diagnostico_resumo.n_marcadores, b: dataset.dataset_resumo.n_variantes_matriz}
+    - {tipo: igual, a: diagnostico.diagnostico_resumo.n_amostras, b: classificar.ml_resumo.n_amostras}
+    - {tipo: igual, a: robustez.robustez_resumo.k_painel, b: classificar.ml_resumo.k_painel_minimo}
+    # painel_minimo_top50 é gerado de k (ml_classificar.py:66): mudar k_painel exige trocar estas 4 refs.
+    # Portões reais de k: robustez.k_painel = classificar.k_painel_minimo (o robustez limita k,
+    # ml_robustez.py:65; o classificar não, ml_classificar.py:61) e contagem_linhas do shap_top.
+    # eco de consistência: não conta como canário (confusion_matrix do ml_classificar sobre o mesmo
+    # y cujo tamanho é o n_amostras; os 5 folds externos do StratifiedKFold são uma partição,
+    # ml_classificar.py:42,47-63,140)
+    - {tipo: soma, total: classificar.ml_resumo.n_amostras, partes: [classificar.ml_resumo.modelos.random_forest.painel_completo.confusion.0.0, classificar.ml_resumo.modelos.random_forest.painel_completo.confusion.0.1, classificar.ml_resumo.modelos.random_forest.painel_completo.confusion.1.0, classificar.ml_resumo.modelos.random_forest.painel_completo.confusion.1.1]}
+    # eco de consistência: não conta como canário (idem, painel mínimo do RF)
+    - {tipo: soma, total: classificar.ml_resumo.n_amostras, partes: [classificar.ml_resumo.modelos.random_forest.painel_minimo_top50.confusion.0.0, classificar.ml_resumo.modelos.random_forest.painel_minimo_top50.confusion.0.1, classificar.ml_resumo.modelos.random_forest.painel_minimo_top50.confusion.1.0, classificar.ml_resumo.modelos.random_forest.painel_minimo_top50.confusion.1.1]}
+    # eco de consistência: não conta como canário (idem, painel completo do XGBoost)
+    - {tipo: soma, total: classificar.ml_resumo.n_amostras, partes: [classificar.ml_resumo.modelos.xgboost.painel_completo.confusion.0.0, classificar.ml_resumo.modelos.xgboost.painel_completo.confusion.0.1, classificar.ml_resumo.modelos.xgboost.painel_completo.confusion.1.0, classificar.ml_resumo.modelos.xgboost.painel_completo.confusion.1.1]}
+    # eco de consistência: não conta como canário (idem, painel mínimo do XGBoost)
+    - {tipo: soma, total: classificar.ml_resumo.n_amostras, partes: [classificar.ml_resumo.modelos.xgboost.painel_minimo_top50.confusion.0.0, classificar.ml_resumo.modelos.xgboost.painel_minimo_top50.confusion.0.1, classificar.ml_resumo.modelos.xgboost.painel_minimo_top50.confusion.1.0, classificar.ml_resumo.modelos.xgboost.painel_minimo_top50.confusion.1.1]}
+    # 12-15: orientação da confusão (linha 0 = y0, linha 1 = y1) contra o n_y0/n_y1 do contraste;
+    # pegam classe positiva trocada (se o y = 1 do ml_classificar.py:86-87 deixar de ser a classe
+    # alfabeticamente maior, a regra que o ml_contraste.py repete) ou rótulos de outro contraste.
+    # Ponto cego: com n_y0 == n_y1 (classes do mesmo tamanho) a troca não muda as somas das
+    # linhas e as quatro não veem nada; aí quem garante a orientação é a sincronia textual das
+    # duas regras (tests/test_ml_contraste.py).
+    - {tipo: soma, total: contraste.contraste_resumo.n_y0, partes: [classificar.ml_resumo.modelos.random_forest.painel_completo.confusion.0.0, classificar.ml_resumo.modelos.random_forest.painel_completo.confusion.0.1]}
+    - {tipo: soma, total: contraste.contraste_resumo.n_y1, partes: [classificar.ml_resumo.modelos.random_forest.painel_completo.confusion.1.0, classificar.ml_resumo.modelos.random_forest.painel_completo.confusion.1.1]}
+    - {tipo: soma, total: contraste.contraste_resumo.n_y0, partes: [classificar.ml_resumo.modelos.xgboost.painel_completo.confusion.0.0, classificar.ml_resumo.modelos.xgboost.painel_completo.confusion.0.1]}
+    - {tipo: soma, total: contraste.contraste_resumo.n_y1, partes: [classificar.ml_resumo.modelos.xgboost.painel_completo.confusion.1.0, classificar.ml_resumo.modelos.xgboost.painel_completo.confusion.1.1]}
+    # eco de consistência: não conta como canário (n_mantidas é contado no mesmo laço que escreve
+    # cada linha do genotipos.tsv, ml_dataset_genotipos.py:82-92)
+    - {tipo: contagem_linhas, porta: dataset.matriz, total: dataset.dataset_resumo.n_variantes_matriz}
+    - {tipo: contagem_linhas, porta: dataset.rotulos, total: classificar.ml_resumo.n_amostras}
+    - {tipo: contagem_linhas, porta: classificar.shap_top, total: classificar.ml_resumo.k_painel_minimo}
+    # eco de consistência: não conta como canário (o nucleo_estavel.tsv é sorted(freq)[:k], freq
+    # tem um marcador por linha da matriz e k = min(k_painel, nº de marcadores), ml_robustez.py:65,78,118)
+    - {tipo: contagem_linhas, porta: robustez.nucleo_estavel, total: robustez.robustez_resumo.k_painel}
+
+selo_pipeline: {testado_em: "", hash: ""}

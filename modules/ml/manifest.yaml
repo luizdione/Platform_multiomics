@@ -111,6 +111,125 @@ scripts:
     mem_gb: 4
     cpus: 2
     tempo_estimado: "2–5 min"
+# Entradas ORQUESTRÁVEIS (pipelines/ml_aims_vcf.yaml, n8n; ESPEC F6 §3.1 + adendo §A8): os
+# MESMOS scripts de `scripts:` (nenhum editado), com entrada e saída por parâmetro e cada
+# porta tipada (omica/contrato/formatos.py), mais dois scripts novos e sem selo (ml_contraste,
+# ml_diagnostico). Esta seção não entra no hash dos selos (registry.hash_dos_passos só lê
+# `scripts:`) e não tem linha de selo: o selos.regravar grava pela ORDEM das linhas de selo.
+# Nenhum cmd lê referência do contexto: `requer_refs` vazio e `especies` no default
+# (bos_taurus), como o pipeline.
+scripts_api:
+  - key: ml_contraste
+    titulo: "Contraste: duas classes da tabela de rótulos"
+    descricao: Separa da tabela amostra→grupo as listas das duas classes escolhidas pelo autor.
+    runtime: "image:omica-bioinfo"
+    cmd: >-
+      python3 modules/ml/scripts/ml_contraste.py
+      --rotulos {rotulos} --classe-a {classe_a} --classe-b {classe_b}
+      --minimo {minimo} --saida {saida}
+    params:
+      - {name: rotulos, rotulo: "Tabela de rótulos (amostra, grupo)", tipo: caminho}
+      - {name: classe_a, rotulo: "Classe A", tipo: texto}
+      - {name: classe_b, rotulo: "Classe B", tipo: texto}
+      - {name: minimo, rotulo: "Mínimo de amostras por classe", default: "10", tipo: inteiro}
+    consome: {rotulos: rotulos_amostras}
+    produz:
+      lista_a: {arquivo: grupo_a.txt, formato: lista_amostras}
+      lista_b: {arquivo: grupo_b.txt, formato: lista_amostras}
+      contraste_resumo: {arquivo: contraste_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~5 s"
+  - key: ml_dataset
+    titulo: "Dataset: genótipos 0/1/2 das duas classes (bcftools)"
+    descricao: Extrai os genótipos das duas classes na região, com MAF mínimo e afinamento.
+    runtime: "image:omica-bioinfo"
+    # `--grupo-a {classe_a}={lista_a}` é UM token: a classe já passou em _problema_nivel (sem
+    # '=', '/' nem ':'), a lista passa em _validar_caminho, e o script divide no 1º '='
+    # (ml_dataset_genotipos.py:35). O teste estrutural do dispatch continua vendo 1 argumento.
+    cmd: >-
+      python3 modules/ml/scripts/ml_dataset_genotipos.py
+      --vcf {vcf} --regiao {regiao}
+      --grupo-a {classe_a}={lista_a} --grupo-b {classe_b}={lista_b}
+      --maf {maf} --passo {passo}
+      --saida {saida}
+    params:
+      - {name: vcf, rotulo: "VCF.gz/BCF indexado com genótipos", tipo: caminho}
+      # adendo §A8.1 (crítica M3): a região é do DADO, não do método. O default é o recorte do
+      # demo e só vale em bos_taurus/demo; fora dele, sem `parametros: {ml.ml_dataset.regiao:
+      # …}` no subprojeto, o plano dá 422 parametro_recusado (falha fechada).
+      - {name: regiao, rotulo: "Região (contig:início-fim)", default: "14:1-2500000", tipo: texto, escopo: subprojeto}
+      - {name: classe_a, rotulo: "Nome da classe A", tipo: texto}
+      - {name: lista_a, rotulo: "IDs da classe A", tipo: caminho}
+      - {name: classe_b, rotulo: "Nome da classe B", tipo: texto}
+      - {name: lista_b, rotulo: "IDs da classe B", tipo: caminho}
+      - {name: maf, rotulo: "MAF mínimo", default: "0.2", tipo: decimal}
+      - {name: passo, rotulo: "Afinamento (1 a cada N)", default: "15", tipo: inteiro}
+    consome: {vcf: vcf_indexado, lista_a: lista_amostras, lista_b: lista_amostras}
+    produz:
+      matriz: {arquivo: genotipos.tsv, formato: matriz_marcadores}
+      rotulos: {arquivo: rotulos.tsv, formato: rotulos_grupos}
+      dataset_resumo: {arquivo: dataset_resumo.json, formato: resumo_json}
+    mem_gb: 2
+    cpus: 2
+    tempo_estimado: "~2 min"
+  - key: ml_diagnostico
+    titulo: "Diagnóstico de informatividade (empates em importância zero)"
+    descricao: Conta marcadores com importância > 0 no XGBoost e no RF e separadores perfeitos.
+    runtime: "image:omica-ml"
+    cmd: >-
+      python3 modules/ml/scripts/ml_diagnostico.py
+      --matriz {matriz} --rotulos {rotulos} --k-painel {k_painel} --saida {saida}
+    params:
+      - {name: matriz, rotulo: "Matriz de marcadores", tipo: caminho}
+      - {name: rotulos, rotulo: "Rótulos (amostra, grupo)", tipo: caminho}
+      - {name: k_painel, rotulo: "Tamanho do painel mínimo", default: "50", tipo: inteiro}
+    consome: {matriz: matriz_marcadores, rotulos: rotulos_grupos}
+    produz:
+      diagnostico_resumo: {arquivo: diagnostico_resumo.json, formato: resumo_json}
+    mem_gb: 2
+    cpus: 2
+    tempo_estimado: "~1 min"
+  - key: ml_classificar
+    titulo: "Classificar: CV aninhada + SHAP + painel mínimo"
+    descricao: RF e XGBoost sob CV aninhada 5×3; SHAP no RF final; painel mínimo dentro do fold.
+    runtime: "image:omica-ml"
+    cmd: >-
+      python3 modules/ml/scripts/ml_classificar.py
+      --matriz {matriz} --rotulos {rotulos} --k-painel {k_painel} --saida {saida}
+    params:
+      - {name: matriz, rotulo: "Matriz de marcadores", tipo: caminho}
+      - {name: rotulos, rotulo: "Rótulos (amostra, grupo)", tipo: caminho}
+      - {name: k_painel, rotulo: "Tamanho do painel mínimo (top-k)", default: "50", tipo: inteiro}
+    consome: {matriz: matriz_marcadores, rotulos: rotulos_grupos}
+    produz:
+      ml_resumo: {arquivo: ml_resumo.json, formato: resumo_json}
+      shap_top: {arquivo: shap_top.tsv, formato: tabela_shap}
+      shap_png: {arquivo: shap_top.png, formato: figura_png}
+    mem_gb: 4
+    cpus: 2
+    tempo_estimado: "3–8 min"
+  - key: ml_robustez
+    titulo: "Robustez do painel (A1/A2/A3)"
+    descricao: Bootstrap de seleção, recorrência entre os 5 folds externos e IC95% das métricas.
+    runtime: "image:omica-ml"
+    cmd: >-
+      python3 modules/ml/scripts/ml_robustez.py
+      --matriz {matriz} --rotulos {rotulos} --k-painel {k_painel} --n-boot {n_boot}
+      --saida {saida}
+    params:
+      - {name: matriz, rotulo: "Matriz de marcadores", tipo: caminho}
+      - {name: rotulos, rotulo: "Rótulos (amostra, grupo)", tipo: caminho}
+      - {name: k_painel, rotulo: "Tamanho do painel (top-k)", default: "50", tipo: inteiro}
+      - {name: n_boot, rotulo: "Reamostragens bootstrap", default: "100", tipo: inteiro}
+    consome: {matriz: matriz_marcadores, rotulos: rotulos_grupos}
+    produz:
+      robustez_resumo: {arquivo: robustez_resumo.json, formato: resumo_json}
+      nucleo_estavel: {arquivo: nucleo_estavel.tsv, formato: tabela_nucleo_estavel}
+      robustez_png: {arquivo: robustez.png, formato: figura_png}
+    mem_gb: 4
+    cpus: 2
+    tempo_estimado: "2–5 min"
 workflows:
   - id: wf_ml_aims
     titulo: "Do BCF ao painel mínimo de AIMs (Angus × Brahman)"

@@ -1,0 +1,29 @@
+{
+  "gerador": "tools/derivar_rotulos_1000bg.py",
+  "fonte": "especies/bos_taurus.yaml#recursos.rotulos_raca",
+  "fonte_caminho": "/data/1000bg_metadata/proveniencia_2026-10-13/rotulos_corrigidos_2026-10-13.tsv",
+  "fonte_md5": "f5cbeca441bded5bc05771dbc237a38d",
+  "regra": "raças com n ≥ 10 em breed_biosample (vazio fica fora); grupo = re.sub(r'[^A-Za-z0-9_.\\-]', '_', raça); colisão de nomes ou nível recusado por formatos._problema_nivel aborta; linhas ordenadas por (grupo, amostra), LF; colunas amostra, grupo, breed_biosample (genetic_pole fica fora: é análise do autor)",
+  "n_amostras": 820,
+  "n_grupos": 16,
+  "n_por_grupo": {
+    "Angus": 102,
+    "Ankole": 18,
+    "Boran": 20,
+    "Brahman": 55,
+    "Charolais": 72,
+    "Composite": 19,
+    "Gelbvieh": 27,
+    "Hanwoo": 23,
+    "Hereford": 72,
+    "Holstein": 187,
+    "Jersey": 61,
+    "Limousin": 39,
+    "N_Dama": 10,
+    "Polish_Holstein-Friesian": 31,
+    "Red_Angus": 18,
+    "Simmental": 66
+  },
+  "saida_sha256": "16141d14edb61e03c7c1d44c02628f576b0730c550de47c3be96eb07233e2595",
+  "data": "2026-10-29"
+}
