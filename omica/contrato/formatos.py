@@ -57,9 +57,21 @@ crua e tem teto de descompressão por bloco e por índice (crítica #2: bomba de
     ANTES do splitlines (crítica #5a: depois dele a regra era código morto).
   - Checagens reprovam, nunca levantam (crítica #6: runs._checagens as chama cruas, e a
     exceção virava 500 com a cópia já gravada), e reprovam VCF ilegível (crítica #5c).
+
+ML e Epigenômica (F6, ESPEC §2 + adendo v2 §A6; 2026-10-29): seis formatos do ML, onze da
+epigenômica e quatro checagens. Dois formatos são PASTA (DIRETORIOS): o `validar` desvia
+para o validador de pasta, que lista os membros com omica/contrato/diretorio.py e guarda o
+veredito num cache pela identidade da pasta e de cada membro.
+  - O `.cov.gz` é lido em TODOS os membros gzip, como o gzip do Python e o gzfile do R (crítica
+    M11: um decompressobj único parava no 1º e um 2º membro com cabeçalho ou bomba passava).
+  - Tetos de descompressão por membro (razão ≤ 20:1 acima de 1 MiB) e por PASTA (linhas e
+    bytes somados, em fluxo; crítica M12). Estouro de teto vai no perfil (`teto`), para o
+    registro responder 413 e não 422.
+  - Resumo com NaN/Infinity reprova (X2: `json_finito`); o JSON da API não os transporta.
 """
 from __future__ import annotations
 
+import copy
 import csv
 import functools
 import gzip
@@ -79,9 +91,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
-from omica.contrato import bgzf
+from omica.contrato import bgzf, diretorio
 
-_NA = {"", "NA", "NaN", "nan", "N/A", "null", "None"}
+_NA ={"", "NA", "NaN", "nan", "N/A", "null", "None"}
 _PNG = b"\x89PNG\r\n\x1a\n"
 
 # Tetos da leitura em fluxo: memória e CPU limitadas mesmo com entrada adversária. Generosos
@@ -571,15 +583,50 @@ def tabela_de(caminho: Path) -> Veredito:
 
 
 # ------------------------------------------------------------------- genéricos
+class NaoFinito(ValueError):
+    """Número não finito (NaN, Infinity, -Infinity ou um decimal que estoura, como 1e999) num
+    JSON. O json do Python os aceita; o JSONResponse do Starlette serializa com
+    allow_nan=False e o GET vira 500 (X2)."""
+
+
+def json_finito(texto: str, *, nao_finito: str = "erro") -> Any:
+    """`json.loads` que não deixa passar número não finito. `nao_finito="erro"` levanta
+    NaoFinito (o resumo_json reprova); `"none"` troca o valor por None (o runs._ler_resumo, para
+    o GET do envelope devolver 200 com null). A mensagem nunca traz o conteúdo do arquivo."""
+    if nao_finito not in ("erro", "none"):
+        raise ValueError(f"nao_finito deve ser 'erro' ou 'none' (veio {nao_finito!r})")
+
+    def _constante(_nome: str) -> None:
+        if nao_finito == "none":
+            return None
+        raise NaoFinito("NaN/Infinity")
+
+    def _decimal(t: str) -> Optional[float]:
+        x = float(t)
+        if math.isfinite(x):
+            return x
+        if nao_finito == "none":
+            return None
+        raise NaoFinito("decimal que estoura o float (ex.: 1e999)")
+
+    return json.loads(texto, parse_constant=_constante, parse_float=_decimal)
+
+
+_MSG_NAO_FINITO = "número não finito (NaN/Infinity) no resumo: o JSON da API não o transporta"
+
+
 @_a_prova_de_leitura
 def resumo_json(caminho: Path) -> Veredito:
     """Objeto JSON não vazio. Roda no envelope de cada passo (GET do estado do run): um resumo
     malformado de script reprova, nunca levanta — nem aninhado fundo demais (RecursionError
-    do json, '[' repetido 200 mil vezes), nem ilegível (OSError, pelo decorador)."""
+    do json, '[' repetido 200 mil vezes), nem ilegível (OSError, pelo decorador). NaN e
+    Infinity reprovam (X2): o escrever_resumo dos scripts grava NaN, e o GET virava 500."""
     if caminho.stat().st_size > _MAX_RESUMO:
         return Veredito("resumo_json", False, [f"resumo com mais de {_MAX_RESUMO} bytes"])
     try:
-        dados = json.loads(caminho.read_text(encoding="utf-8"))
+        dados = json_finito(caminho.read_text(encoding="utf-8"), nao_finito="erro")
+    except NaoFinito:
+        return Veredito("resumo_json", False, [_MSG_NAO_FINITO])
     except UnicodeDecodeError:
         return Veredito("resumo_json", False, ["arquivo não é texto UTF-8"])
     except json.JSONDecodeError as e:
@@ -987,6 +1034,7 @@ def _ler_vcf_bruto(caminho: Path) -> dict[str, Any]:
         falhas += _primeiro_registro(ini, cab)
         r.update({"contigs_cab": cab["contigs"], "por_tid": cab["por_tid"], "info": frozenset(cab["info"]),
                   "format": frozenset(cab["format"]), "n_amostras": len(cab["amostras"]),
+                  "amostras": tuple(cab["amostras"]),  # F6: vcf_e_rotulos (o cache é só leitura)
                   "tem_registro": ini["primeiro"] is not None})
         # 3) índice(s) ao lado — os candidatos são os de IRMAOS (BCF: só .csi)
         sufixos = IRMAOS["vcf_indexado"][".bcf" if tipo == "bcf" else ".vcf.gz"]
@@ -1403,6 +1451,1160 @@ def tabela_vep(caminho: Path) -> Veredito:
         "consequencia_topo": top[0][0] if top else None, "recontagem_top15": [[t, n] for t, n in top]})
 
 
+# ===================================================================== ML (F6)
+# ESPEC §2.2 + adendo §A6.1. Consumidores: ml_contraste.py (tabela de rótulos), o
+# ml_dataset_genotipos.py (listas: read_text().splitlines(), strip, set — `_ler_grupo`), o
+# ml_classificar.py e o ml_robustez.py (pandas read_csv sep='\t', index_col=0).
+_ID_ROTULO = re.compile(r"[A-Za-z0-9_.\-]{1,64}", re.ASCII)
+_ID_AMOSTRA = re.compile(r"[A-Za-z0-9._\-]{1,64}", re.ASCII)
+_MAX_NIVEIS_ROTULO = 50   # acima disso valores_coluna devolve None: a escolha daria 422 em todo plano
+_MIN_POR_NIVEL_ML = 10    # ml_dataset_genotipos.py:65-66
+_MIN_POR_NIVEL_CV = 5     # StratifiedKFold(5) do ml_classificar e do ml_robustez
+_MAX_LISTA = 4 << 20      # bytes de uma lista de amostras
+# decimal que o pandas lê como float e o float() do Python lê igual: sem '1_0', 'infinity', 'NAN'
+_DECIMAL_ESTRITO = re.compile(r"-?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?", re.ASCII)
+_RECORRENCIA = re.compile(r"[0-5]/5", re.ASCII)
+
+
+def _decimal_finito(t: str) -> Optional[float]:
+    """float de um texto que casa _DECIMAL (sem espaço, sem inf/nan/'1_0'), ou None."""
+    if not _DECIMAL.fullmatch(t):
+        return None
+    x = float(t)
+    return x if math.isfinite(x) else None
+
+
+def _texto_como_read_text(caminho: Path, max_bytes: int) -> tuple[list[str], bool, bool]:
+    """Exatamente o `Path.read_text(encoding='utf-8').splitlines()` dos scripts (newline=None
+    traduz \\r\\n e \\r; splitlines ainda corta em \\x0b \\x0c \\x1c-\\x1e \\x85 \\u2028 \\u2029).
+    Acima de `max_bytes` levanta _Ilegivel. Devolve (linhas, tem BOM, tem \\r)."""
+    if caminho.stat().st_size > max_bytes:
+        raise _Teto(f"arquivo com mais de {max_bytes} bytes (teto da leitura)")
+    bruto = caminho.read_bytes()
+    texto = bruto.decode("utf-8")
+    return (texto.replace("\r\n", "\n").replace("\r", "\n").splitlines(),
+            bruto.startswith(b"\xef\xbb\xbf"), b"\r" in bruto)
+
+
+@_a_prova_de_leitura
+def rotulos_amostras(caminho: Path) -> Veredito:
+    """Tabela amostra → grupo que o autor manda (entrada do ml_aims_vcf; as duas classes são
+    escolhas do autor sobre a coluna `grupo`). Precisa de `amostra` e `grupo`; as outras colunas
+    são ignoradas, mas toda linha tem o nº de campos do cabeçalho. A amostra vira nome de coluna
+    da matriz e índice do pandas: com cara de número (1001) o .loc do ml_classificar dá KeyError;
+    'NA' o pandas lê como ausente. O grupo vira argumento do script (_problema_nivel). Entre 2 e
+    50 grupos (acima de 50 a escolha não tem lista), cada um com ≥10 amostras (o dataset exige)."""
+    teto = (_MAX_AMOSTRAS, f"mais de {_MAX_AMOSTRAS} amostras (teto da leitura; linhas vazias contam)")
+    with _abrir(caminho, aparar_cabecalho=False, teto=teto) as t:
+        cab = t.cab
+        if "amostra" not in cab or "grupo" not in cab:
+            return Veredito("rotulos_amostras", False,
+                            [f"precisa das colunas 'amostra' e 'grupo' (achei {len(cab)} coluna(s): "
+                             f"{_nomes(cab, so_identificadores=True)})"] + t.falha_aspas())
+        falhas = [f"coluna {c!r} aparece {cab.count(c)} vezes no cabeçalho"
+                  for c in ("amostra", "grupo") if cab.count(c) > 1]
+        ia, ig = cab.index("amostra"), cab.index("grupo")
+        largura = len(cab)
+        ruins = _Ocorrencias()
+        vistas: set[str] = set()
+        niveis: dict[str, int] = {}
+        for k, linha in t.linhas():
+            if len(linha) != largura:
+                ruins.add(f"nº de campos diferente do cabeçalho ({largura})", f"linha {k}")
+                continue
+            a, g = linha[ia], linha[ig]
+            if not a:
+                ruins.add("amostra vazia", f"linha {k}")
+                continue
+            if a in _NA:
+                ruins.add("amostra igual a um token de NA ('NA', 'null'…): o pandas a lê como ausente", f"linha {k}")
+                continue
+            if not _ID_ROTULO.fullmatch(a):
+                ruins.add("amostra fora de [A-Za-z0-9_.-]{1,64} (espaço, acento ou longa demais)", f"linha {k}")
+                continue
+            if r_le_como_nao_texto(a):
+                ruins.add("amostra com cara de número (ex.: 1001): o pandas a lê como int no índice e o .loc do "
+                          "ml_classificar dá KeyError; prefixe os IDs", f"linha {k}")
+                continue
+            if a in vistas:
+                ruins.add("amostra repetida", f"linha {k}")
+                continue
+            vistas.add(a)
+            pg = "grupo vazio" if not g else _problema_nivel(g)
+            if pg:
+                ruins.add(f"grupo: {pg}", f"linha {k}")
+                continue
+            niveis[g] = niveis.get(g, 0) + 1
+        falhas += ruins.lista() + t.falha_aspas()
+    if len(niveis) < 2:
+        falhas.append(f"precisa de ≥2 grupos (achei {len(niveis)})")
+    if len(niveis) > _MAX_NIVEIS_ROTULO:
+        falhas.append(f"{len(niveis)} grupos: acima de {_MAX_NIVEIS_ROTULO} a coluna deixa de ser de nível e a "
+                      "escolha do autor fica sem lista (todo plano daria 422)")
+    pequenos = sorted(g for g, n in niveis.items() if n < _MIN_POR_NIVEL_ML)
+    if pequenos:
+        falhas.append(f"{len(pequenos)} grupo(s) com menos de {_MIN_POR_NIVEL_ML} amostras (ex.: "
+                      f"{_nome_seguro(pequenos[0])} com {niveis[pequenos[0]]}): o ml_dataset_genotipos exige "
+                      f"≥{_MIN_POR_NIVEL_ML} por grupo")
+    ok = not falhas
+    perfil: dict[str, Any] = {"n_amostras": sum(niveis.values()), "n_niveis": len(niveis)}
+    if ok:
+        perfil["niveis"] = dict(sorted(niveis.items()))
+    return Veredito("rotulos_amostras", ok, falhas, perfil)
+
+
+@_a_prova_de_leitura
+def lista_amostras(caminho: Path) -> Veredito:
+    """Lida como o ml_dataset_genotipos._ler_grupo (ml_dataset_genotipos.py:34-39):
+    read_text().splitlines(), strip, linhas não vazias, set. O script NÃO pula '#': a linha vira
+    ID. O mínimo do formato é 2 IDs (o Fst usará o mesmo formato); o mínimo de 10 do ML fica no
+    ml_contraste e no dataset. Esboço da F5 (genomica_formatos.py:1005-1035) com os auxiliares
+    (crítica M5: sem eles, NameError e 500 no polling)."""
+    linhas, bom, crlf = _texto_como_read_text(caminho, _MAX_LISTA)
+    falhas: list[str] = []
+    ruins = _Ocorrencias()
+    if bom:
+        falhas.append("BOM UTF-8 no início: o 1º ID viraria '\\ufeffSAMEA…' e sairia da interseção em silêncio")
+    ids: list[str] = []
+    vistos: set[str] = set()
+    for n, l in enumerate(linhas, 1):
+        s = l.strip()
+        if not s:
+            continue
+        s0 = s.lstrip("﻿") if n == 1 else s
+        if s.startswith("#"):
+            ruins.add("linha '#': o _ler_grupo do ml_dataset_genotipos não pula comentário e a leria como ID",
+                      f"linha {n}")
+        elif not _ID_AMOSTRA.fullmatch(s0):
+            ruins.add("ID com espaço/TAB interno ou caractere fora de [A-Za-z0-9._-]", f"linha {n}")
+        elif s0 in vistos:
+            ruins.add("ID repetido (o script colapsa num set: lista malformada)", f"linha {n}")
+        else:
+            vistos.add(s0)
+            ids.append(s0)
+    falhas += ruins.lista()
+    if len(ids) < 2:
+        falhas.append(f"{len(ids)} ID(s): o formato exige ≥2 (o ML exige ≥10 por grupo no ml_contraste e no "
+                      "dataset)")
+    pref = Counter(re.match(r"[A-Za-z]*", i).group(0) for i in ids)
+    return Veredito("lista_amostras", not falhas, falhas,
+                    {"n_ids": len(ids), "prefixos": dict(pref.most_common(5)), "crlf": crlf, "ids": ids[:50]})
+
+
+@_a_prova_de_leitura
+def matriz_marcadores(caminho: Path) -> Veredito:
+    """genotipos.tsv do dataset (marcador × amostras), lida pelo pandas com index_col=0 e
+    na_values='NA'. Coluna 1 = ID do marcador (nome livre; o dataset grava 'variante'), ≥2
+    amostras únicas; toda linha com o nº de campos do cabeçalho (cabeçalho com um campo a menos,
+    estilo write.table do R, reprova). Valor: token de NA ou decimal finito por regex estrita
+    ('.', '-', texto e 'inf' quebram o SimpleImputer). Linha toda NA reprova: o SimpleImputer a
+    descarta e desloca os nomes no shap_top.tsv e no nucleo_estavel.tsv. 0 marcadores reprova
+    (contig ausente ou --maf > 0,5 terminam assim, com código 0)."""
+    teto = (_MAX_GENES, f"mais de {_MAX_GENES} marcadores (teto da leitura; linhas vazias contam)")
+    with _abrir(caminho, aparar_cabecalho=False, teto=teto) as t:
+        cab = t.cab
+        if not cab or not cab[0]:
+            return Veredito("matriz_marcadores", False, ["1ª coluna (ID do marcador) sem nome no cabeçalho"]
+                            + t.falha_aspas())
+        amostras = cab[1:]
+        if len(amostras) > _MAX_AMOSTRAS:
+            return Veredito("matriz_marcadores", False, [f"mais de {_MAX_AMOSTRAS} colunas de amostra (teto da leitura)"])
+        falhas: list[str] = []
+        if len(amostras) < 2:
+            falhas.append(f"precisa de ≥2 colunas de amostra (achei {len(amostras)})")
+        if any(not a for a in amostras):
+            falhas.append("nome de amostra vazio no cabeçalho")
+        if len(set(amostras)) != len(amostras):
+            falhas.append("nomes de amostra repetidos no cabeçalho")
+        if cab[0] in amostras:
+            falhas.append("uma coluna de amostra tem o nome da coluna de ID")
+        largura = len(cab)
+        ruins = _Ocorrencias()
+        vistos: set[int] = set()
+        n = n_na = n_com_na = n_const = 0
+        so_012 = True
+        for k, linha in t.linhas():
+            n += 1
+            if len(linha) != largura:
+                if len(linha) == largura + 1:
+                    ruins.add("linha com um campo a mais: cabeçalho com um campo a menos (estilo write.table do R "
+                              "com row.names) — o pandas deslocaria as colunas", f"linha {k}")
+                else:
+                    ruins.add(f"nº de campos diferente do cabeçalho ({largura})", f"linha {k}")
+                continue
+            mid = linha[0]
+            if not mid:
+                ruins.add("ID do marcador vazio", f"linha {k}")
+            else:
+                h = _chave_hash(mid)
+                if h in vistos:
+                    ruins.add("ID do marcador repetido (o ml_robustez usa nomes.index() e um dict)", f"linha {k}")
+                vistos.add(h)
+            valores: set[float] = set()
+            na_linha = 0
+            for j in range(1, largura):
+                v = linha[j]
+                if v in _NA:
+                    na_linha += 1
+                    continue
+                x = float(v) if _DECIMAL_ESTRITO.fullmatch(v) else math.nan
+                if not math.isfinite(x):
+                    ruins.add("valor que não é NA nem decimal finito ('.', '-', texto, inf): a coluna viraria "
+                              "texto no pandas e o SimpleImputer quebraria", f"linha {k} coluna {j + 1}")
+                    continue
+                valores.add(x)
+                if x not in (0.0, 1.0, 2.0):
+                    so_012 = False
+            n_na += na_linha
+            if na_linha:
+                n_com_na += 1
+            if na_linha == largura - 1:
+                ruins.add("linha com todas as amostras NA: o SimpleImputer a descarta e desloca os nomes no "
+                          "shap_top.tsv e no nucleo_estavel.tsv", f"linha {k}")
+            elif len(valores) == 1:
+                n_const += 1
+        falhas += ruins.lista() + t.falha_aspas()
+    if not n:
+        falhas.append("0 marcadores: a matriz só tem o cabeçalho (contig ausente ou --maf acima de 0,5 terminam "
+                      "assim, com código 0)")
+    celulas = n * max(len(amostras), 1)
+    return Veredito("matriz_marcadores", not falhas, falhas, {
+        "n_marcadores": n, "n_amostras": len(amostras), "coluna_id": _nome_seguro(cab[0]),
+        "frac_na": round(n_na / celulas, 4) if celulas else 0.0, "n_linhas_com_na": n_com_na,
+        "n_linhas_constantes": n_const, "codificacao_0_1_2": so_012 and n > 0})
+
+
+@_a_prova_de_leitura
+def rotulos_grupos(caminho: Path) -> Veredito:
+    """rotulos.tsv do dataset, lido pelo ml_classificar com index_col=0 e ['grupo']: coluna 1 =
+    'amostra' (o ID), 'grupo' na posição 2 ou depois (na 1ª o index_col a consumiria: KeyError).
+    EXATAMENTE 2 grupos (com 1, IndexError; com 3, o script binariza classes[1] contra o resto
+    sem aviso), ≥5 amostras por grupo (StratifiedKFold(5)), com aviso abaixo de 10. ID único,
+    sem cara de número nem token de NA."""
+    teto = (_MAX_AMOSTRAS, f"mais de {_MAX_AMOSTRAS} amostras (teto da leitura; linhas vazias contam)")
+    with _abrir(caminho, aparar_cabecalho=False, teto=teto) as t:
+        cab = t.cab
+        if cab and cab[0] == "grupo":
+            return Veredito("rotulos_grupos", False, [
+                "'grupo' na 1ª coluna: o index_col=0 do ml_classificar a consome como índice e a coluna 'grupo' "
+                "deixa de existir (KeyError)"] + t.falha_aspas())
+        if not cab or cab[0] != "amostra" or cab.count("grupo") != 1:
+            return Veredito("rotulos_grupos", False, [
+                f"precisa de 'amostra' na 1ª coluna e de UMA coluna 'grupo' depois dela (achei "
+                f"{_nomes(cab, so_identificadores=True)})"] + t.falha_aspas())
+        ig = cab.index("grupo")
+        largura = len(cab)
+        ruins = _Ocorrencias()
+        vistas: set[str] = set()
+        niveis: dict[str, int] = {}
+        for k, linha in t.linhas():
+            if len(linha) != largura:
+                ruins.add(f"nº de campos diferente do cabeçalho ({largura})", f"linha {k}")
+                continue
+            a, g = linha[0], linha[ig]
+            if not a or a in _NA:
+                ruins.add("ID de amostra vazio ou token de NA", f"linha {k}")
+                continue
+            if r_le_como_nao_texto(a):
+                ruins.add("ID de amostra com cara de número (ex.: 1001): o pandas o lê como int no índice e ele "
+                          "não casa com o cabeçalho da matriz (KeyError)", f"linha {k}")
+                continue
+            if a in vistas:
+                ruins.add("ID de amostra repetido (o .loc duplicaria a amostra)", f"linha {k}")
+                continue
+            vistas.add(a)
+            pg = "grupo vazio" if not g else _problema_nivel(g)
+            if pg:
+                ruins.add(f"grupo: {pg}", f"linha {k}")
+                continue
+            niveis[g] = niveis.get(g, 0) + 1
+        falhas = ruins.lista() + t.falha_aspas()
+    if len(niveis) != 2:
+        falhas.append(f"precisa de exatamente 2 grupos (achei {len(niveis)}): com 1 o ml_classificar dá "
+                      "IndexError; com 3 ou mais ele binariza classes[1] contra o resto, sem aviso")
+    for g, n in sorted(niveis.items()):
+        if n < _MIN_POR_NIVEL_CV:
+            falhas.append(f"grupo {_nome_seguro(g)} com {n} amostra(s): o StratifiedKFold(5) precisa de "
+                          f"≥{_MIN_POR_NIVEL_CV} por grupo")
+    avisos = [f"grupo {_nome_seguro(g)} com {n} amostras (< {_MIN_POR_NIVEL_ML}, o mínimo do dataset)"
+              for g, n in sorted(niveis.items()) if _MIN_POR_NIVEL_CV <= n < _MIN_POR_NIVEL_ML]
+    ok = not falhas
+    perfil: dict[str, Any] = {"n_amostras": sum(niveis.values()), "avisos": avisos}
+    if ok:
+        perfil.update({"niveis": dict(sorted(niveis.items())), "classe_positiva": max(niveis)})
+    return Veredito("rotulos_grupos", ok, falhas, perfil)
+
+
+@_a_prova_de_leitura
+def tabela_shap(caminho: Path) -> Veredito:
+    """shap_top.tsv (ml_classificar.py: f'{var}\\t{v:.6g}'): cabeçalho exato `VARIANTE
+    SHAP_MEDIO_ABS`, VARIANTE única, valor decimal finito ≥ 0 em ordem não crescente (o .6g usa
+    notação científica abaixo de 1e-4: '9.5e-05' passa)."""
+    teto = (_MAX_GENES, f"mais de {_MAX_GENES} linhas (teto da leitura)")
+    with _abrir(caminho, aparar_cabecalho=False, teto=teto) as t:
+        if t.cab != ["VARIANTE", "SHAP_MEDIO_ABS"]:
+            return Veredito("tabela_shap", False, ["cabeçalho diferente de 'VARIANTE SHAP_MEDIO_ABS' (separados por "
+                                                   "TAB)"] + t.falha_aspas())
+        ruins = _Ocorrencias()
+        vistas: set[str] = set()
+        n, ant, maximo = 0, math.inf, None
+        for k, linha in t.linhas():
+            if len(linha) != 2:
+                ruins.add("nº de campos diferente de 2", f"linha {k}")
+                continue
+            n += 1
+            var, tv = linha
+            if not var:
+                ruins.add("VARIANTE vazia", f"linha {k}")
+            elif var in vistas:
+                ruins.add("VARIANTE repetida", f"linha {k}")
+            vistas.add(var)
+            x = _decimal_finito(tv)
+            if x is None or x < 0:
+                ruins.add("SHAP_MEDIO_ABS não é decimal finito ≥ 0", f"linha {k}")
+                continue
+            if x > ant:
+                ruins.add("SHAP_MEDIO_ABS crescente: o script grava em ordem não crescente", f"linha {k}")
+            ant = x
+            maximo = x if maximo is None else max(maximo, x)
+        falhas = ruins.lista() + t.falha_aspas()
+    if not n:
+        falhas.append("tabela sem linhas")
+    return Veredito("tabela_shap", not falhas, falhas, {"n_linhas": n, "shap_max": maximo})
+
+
+@_a_prova_de_leitura
+def tabela_nucleo_estavel(caminho: Path) -> Veredito:
+    """nucleo_estavel.tsv (ml_robustez.py: f'{nome}\\t{fr:.3f}\\t{rec}/5'): cabeçalho exato,
+    MARCADOR único, FREQ_BOOTSTRAP em [0,1] em ordem não crescente, RECORRENCIA_FOLDS casa
+    '[0-5]/5'. `alerta_empate` = todas as linhas com FREQ 1.000 e 5/5 (top-k preenchido por
+    empates de importância zero, como no demo): aviso, não falha."""
+    cab_ok = ["MARCADOR", "FREQ_BOOTSTRAP", "RECORRENCIA_FOLDS"]
+    teto = (_MAX_GENES, f"mais de {_MAX_GENES} linhas (teto da leitura)")
+    with _abrir(caminho, aparar_cabecalho=False, teto=teto) as t:
+        if t.cab != cab_ok:
+            return Veredito("tabela_nucleo_estavel", False, ["cabeçalho diferente de 'MARCADOR FREQ_BOOTSTRAP "
+                                                             "RECORRENCIA_FOLDS' (separados por TAB)"] + t.falha_aspas())
+        ruins = _Ocorrencias()
+        vistos: set[str] = set()
+        n = n_ge_080 = 0
+        ant = math.inf
+        recorrencia: Counter[str] = Counter()
+        empate = True
+        for k, linha in t.linhas():
+            if len(linha) != 3:
+                ruins.add("nº de campos diferente de 3", f"linha {k}")
+                continue
+            n += 1
+            m, tf, rec = linha
+            if not m:
+                ruins.add("MARCADOR vazio", f"linha {k}")
+            elif m in vistos:
+                ruins.add("MARCADOR repetido", f"linha {k}")
+            vistos.add(m)
+            if not _RECORRENCIA.fullmatch(rec):
+                ruins.add("RECORRENCIA_FOLDS fora de '[0-5]/5'", f"linha {k}")
+            else:
+                recorrencia[rec] += 1
+            f = _decimal_finito(tf)
+            if f is None or not 0.0 <= f <= 1.0:
+                ruins.add("FREQ_BOOTSTRAP fora de [0,1] ou não decimal", f"linha {k}")
+                empate = False
+                continue
+            if f > ant:
+                ruins.add("FREQ_BOOTSTRAP crescente: o script grava em ordem não crescente", f"linha {k}")
+            ant = f
+            n_ge_080 += f >= 0.8
+            empate = empate and f == 1.0 and rec == "5/5"
+        falhas = ruins.lista() + t.falha_aspas()
+    if not n:
+        falhas.append("tabela sem linhas")
+    return Veredito("tabela_nucleo_estavel", not falhas, falhas, {
+        "n_linhas": n, "n_freq_ge_0_80": n_ge_080, "recorrencia": dict(sorted(recorrencia.items())),
+        "alerta_empate": bool(n) and empate})
+
+
+# ============================================================== Epigenômica (F6)
+# ESPEC §2.3 + adendo §A6.2. Consumidores: metilacao_dmc.R (methRead bismarkCoverage), o
+# perfil_tss.py e o mofa_preparar.py (gzip.open + split('\t'), int(campos[1])), o
+# intersecao_dmc_painel.py e o motifs_homer.py (read_text/csv), o mofa_treinar(_api).py.
+_MAX_LINHAS_COV = 50_000_000         # linhas por membro
+_MAX_DESCOMPRIMIDO_COV = 4 << 30     # bytes descomprimidos por membro
+_MAX_CROMOSSOMOS = 10_000
+_MAX_PAINEL_JSON = 4 << 20
+_MAX_GENES_PAINEL = 10_000
+_MAX_LINHAS_METHYLKIT = 10_000_000
+_GZ_MAGIC = b"\x1f\x8b"
+_BLOCO_GZ = 16 << 10                 # entrada comprimida por chamada: no máximo ~16 MiB de saída, mesmo numa bomba
+_MIN_DESCOMPRIMIDO_RAZAO = 1 << 20   # a razão só vale acima de 1 MiB descomprimido
+_CROM = re.compile(r"[A-Za-z0-9_.\-]{1,64}", re.ASCII)
+_CROM_B = re.compile(rb"[A-Za-z0-9_.\-]{1,64}")
+_DECIMAL_B = re.compile(rb"(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+_ENSEMBL = re.compile(r"[A-Za-z0-9_.\-]{0,64}", re.ASCII)
+_SUFIXOS_COV = (".bismark.cov.gz", ".cov.gz", ".bismark.cov", ".cov")
+_SUFIXO_POR_CONDICAO = ".bismark.cov.gz"
+_CAB_METHYLKIT = ("chr", "start", "end", "strand", "pvalue", "qvalue", "meth.diff")
+_MSG_CAB_COV = ("linha de cabeçalho ou de texto: o bismarkCoverage não tem cabeçalho, e o perfil_tss.py faz "
+                "int() do início e para")
+
+
+def stem_coverage(nome: str) -> Optional[str]:
+    """A `amostra` do coldata é o nome do arquivo sem o sufixo (decisão 7), do mais longo ao
+    mais curto: .bismark.cov.gz, .cov.gz, .bismark.cov, .cov. None = não é coverage. O
+    montar_coverages.py repete esta função (teste de sincronia)."""
+    for s in _SUFIXOS_COV:
+        if nome.endswith(s):
+            return nome[:-len(s)] or None
+    return None
+
+
+def nome_por_condicao(nivel: str, amostra: str) -> str:
+    """Nome final na porta montar.coverages: o grupo sai do NOME (a disjunção por substring
+    dos scripts selados). O montar_coverages.py repete esta função (teste de sincronia)."""
+    return f"{nivel}__{amostra}{_SUFIXO_POR_CONDICAO}"
+
+
+class _TetoPasta(_Teto):
+    """Estouro de teto de tamanho (não de conteúdo): o perfil leva `teto` e o registro
+    responde 413 `entrada_grande_demais`, não 422."""
+
+    def __init__(self, motivo: str, limite: dict[str, int]) -> None:
+        super().__init__(motivo)
+        self.limite = limite
+
+
+def _blocos_gzip(f, nome: str, lidos: list[int]) -> Iterator[bytes]:
+    """Bytes descomprimidos de TODOS os membros gzip em sequência, como o gzip do Python e o
+    gzfile do R (crítica M11): a cada fim de membro, um decompressobj(31) novo sobre o que
+    sobrou. Depois do último membro, byte que não começa por 1f8b é lixo e reprova. `lidos[0]`
+    conta os bytes comprimidos lidos (a razão de compressão)."""
+    d = None
+    buf = b""
+    fim = False
+    n_membros = 0
+    while True:
+        if not buf and not fim:
+            buf = f.read(_BLOCO_GZ)
+            lidos[0] += len(buf)
+            fim = not buf
+        if d is None:
+            if not buf:
+                if not n_membros:
+                    raise _Ilegivel(f"{nome}: '.cov.gz' vazio")
+                return
+            if len(buf) < 2 and not fim:
+                mais = f.read(_BLOCO_GZ)
+                lidos[0] += len(mais)
+                fim = not mais
+                buf += mais
+                continue
+            if buf[:2] != _GZ_MAGIC:
+                if not n_membros:
+                    raise _Ilegivel(f"{nome}: '.cov.gz' que não é gzip (sem o magic 1f8b)")
+                raise _Ilegivel(f"{nome}: lixo depois do gzip (bytes que não são outro membro gzip): o gzip do "
+                                "Python recusa e o zlib do R os ignora — os dois leriam coisas diferentes")
+            d = zlib.decompressobj(31)
+            n_membros += 1
+        if not buf:
+            raise _Ilegivel(f"{nome}: gzip truncado: o arquivo acaba no meio de um membro")
+        try:
+            saida = d.decompress(buf)
+        except zlib.error:
+            raise _Ilegivel(f"{nome}: gzip truncado ou corrompido (erro do zlib)") from None
+        buf = b""
+        if saida:
+            yield saida
+        if d.eof:
+            buf, d = d.unused_data, None
+
+
+class _LeituraCov:
+    """Contadores da pasta inteira (os tetos agregados valem em fluxo, entre membros)."""
+
+    def __init__(self) -> None:
+        self.linhas = 0
+        self.descomprimido = 0
+        self.bytes = 0
+        # a razão AGREGADA: Σ comprimido dos .cov.gz já lidos e Σ do que eles descomprimem. Só
+        # por membro, a bomba partida em membros abaixo de 1 MiB passava (200 × (1 MiB − 64 B),
+        # 415.600 B → 209,7 MB, 505:1). O .cov não entra: é lido 1:1 do disco, não descomprime
+        self.gz_comprimido = 0
+        self.gz_descomprimido = 0
+        self.n_crlf = 0
+        self.cromossomos: dict[str, None] = {}
+        self.ruins = _Ocorrencias()
+        self.avisos: list[str] = []
+
+
+def _ler_cov_membro(f, nome: str, est: _LeituraCov) -> None:
+    """Um coverage Bismark (6 campos por TAB: cromossomo, início, fim, %, metilados, não
+    metilados), lido como os consumidores o leem, linha a linha e em fluxo."""
+    lidos = [0]
+    if nome.endswith(".gz"):
+        blocos: Iterator[bytes] = _blocos_gzip(f, nome, lidos)
+        gz = True
+    else:
+        inicio = f.read(2)
+        if inicio == _GZ_MAGIC:
+            raise _Ilegivel(f"{nome}: '.cov' com conteúdo gzip: o montar o comprimiria de novo e o perfil_tss.py "
+                            "abre tudo como gzip; renomeie para .cov.gz")
+
+        def _cru() -> Iterator[bytes]:
+            yield inicio
+            yield from iter(lambda: f.read(1 << 20), b"")
+        blocos, gz = _cru(), False
+    teto_pasta_b, teto_pasta_l = diretorio.MAX_DESCOMPRIMIDO_PASTA, diretorio.MAX_LINHAS_PASTA
+    razao = diretorio.MAX_RAZAO_GZIP
+    ruins, cromossomos = est.ruins, est.cromossomos
+    desc = n = n_crlf = regride = reaparece = 0
+    resto = b""
+    ultimo, ult_pos = None, -1
+    vistos: set[bytes] = set()
+
+    def _linhas(partes: list[bytes]) -> None:
+        nonlocal n, n_crlf, regride, reaparece, ultimo, ult_pos
+        for linha in partes:
+            n += 1
+            if linha[-1:] == b"\r":
+                linha = linha[:-1]
+                n_crlf += 1
+            if not linha:
+                ruins.add("linha vazia (o bismarkCoverage não grava linha vazia)", f"{nome} linha {n}")
+                continue
+            if b"\r" in linha:
+                ruins.add("'\\r' fora do fim da linha: o R e o Python cortariam a linha em lugares diferentes",
+                          f"{nome} linha {n}")
+                continue
+            c = linha.split(b"\t")
+            if len(c) != 6:
+                ruins.add(_MSG_CAB_COV if linha.startswith((b"#", b"track", b"browser")) else
+                          "nº de campos diferente de 6 (cromossomo, início, fim, %metilação, metilados, não "
+                          "metilados)", f"{nome} linha {n}")
+                continue
+            crom, ini, fim, pct, m, u = c
+            if not (ini.isdigit() and fim.isdigit()):
+                ruins.add(_MSG_CAB_COV, f"{nome} linha {n}")
+                continue
+            if not _CROM_B.fullmatch(crom):
+                ruins.add("cromossomo fora de [A-Za-z0-9_.-]{1,64} (espaço, acento ou longo demais)", f"{nome} linha {n}")
+                continue
+            if len(ini) > 10 or len(fim) > 10 or not 1 <= int(ini) <= int(fim):
+                ruins.add("início/fim fora de 1 ≤ início ≤ fim (inteiros de até 10 dígitos)", f"{nome} linha {n}")
+                continue
+            if not (m.isdigit() and u.isdigit()) or len(m) > 12 or len(u) > 12:
+                ruins.add("metilados/não metilados não são inteiros ≥ 0", f"{nome} linha {n}")
+                continue
+            mi, ui = int(m), int(u)
+            if mi + ui < 1:
+                ruins.add("metilados + não metilados = 0 (CpG sem leitura)", f"{nome} linha {n}")
+                continue
+            if not _DECIMAL_B.fullmatch(pct) or not 0.0 <= float(pct) <= 100.0:
+                ruins.add("%metilação não é decimal em [0, 100]", f"{nome} linha {n}")
+                continue
+            if abs(float(pct) - 100.0 * mi / (mi + ui)) > 1e-6:
+                ruins.add("%metilação incoerente com metilados/(metilados + não metilados) (|Δ| > 1e-6)",
+                          f"{nome} linha {n}")
+                continue
+            pos = int(ini)
+            if crom != ultimo:
+                if crom in vistos:
+                    reaparece += 1
+                vistos.add(crom)
+                ultimo, ult_pos = crom, pos
+                cs = crom.decode("ascii")
+                if cs not in cromossomos:
+                    cromossomos[cs] = None
+                    if len(cromossomos) > _MAX_CROMOSSOMOS:
+                        raise _TetoPasta(f"mais de {_MAX_CROMOSSOMOS} cromossomos somando os membros (teto)",
+                                         {"limite_cromossomos": _MAX_CROMOSSOMOS})
+            else:
+                if pos < ult_pos:
+                    regride += 1
+                ult_pos = pos
+
+    for bloco in blocos:
+        desc += len(bloco)
+        est.descomprimido += len(bloco)
+        if desc > _MAX_DESCOMPRIMIDO_COV:
+            raise _TetoPasta(f"{nome}: mais de {_MAX_DESCOMPRIMIDO_COV} bytes descomprimidos num membro (teto)",
+                             {"limite_bytes": _MAX_DESCOMPRIMIDO_COV})
+        if est.descomprimido > teto_pasta_b:
+            raise _TetoPasta(f"mais de {teto_pasta_b} bytes descomprimidos somando os membros da pasta (teto)",
+                             {"limite_bytes": teto_pasta_b, "limite_linhas": teto_pasta_l})
+        if gz and desc > _MIN_DESCOMPRIMIDO_RAZAO and desc > razao * lidos[0]:
+            raise _Ilegivel(f"{nome}: razão de compressão > {razao}:1: não é coverage Bismark (o dado real comprime "
+                            "cerca de 5:1)")
+        if gz:
+            est.gz_descomprimido += len(bloco)
+            if (est.gz_descomprimido > _MIN_DESCOMPRIMIDO_RAZAO
+                    and est.gz_descomprimido > razao * (est.gz_comprimido + lidos[0])):
+                raise _Ilegivel(f"razão de compressão > {razao}:1 somando os membros .cov.gz da pasta: não é "
+                                "coverage Bismark (o dado real comprime cerca de 5:1; partir a bomba em membros "
+                                "abaixo de 1 MiB não escapa da razão)")
+        partes = (resto + bloco).split(b"\n")
+        resto = partes.pop()
+        if len(resto) > _MAX_LINHA:
+            raise _Ilegivel(f"{nome}: linha {n + 1} com mais de {_MAX_LINHA} bytes")
+        antes = n
+        _linhas(partes)
+        est.linhas += n - antes
+        if n > _MAX_LINHAS_COV:
+            raise _TetoPasta(f"{nome}: mais de {_MAX_LINHAS_COV} linhas num membro (teto)",
+                             {"limite_linhas": _MAX_LINHAS_COV})
+        if est.linhas > teto_pasta_l:
+            raise _TetoPasta(f"mais de {teto_pasta_l} linhas somando os membros da pasta (teto)",
+                             {"limite_linhas": teto_pasta_l, "limite_bytes": teto_pasta_b})
+    if gz:
+        est.gz_comprimido += lidos[0]   # o membro inteiro (lidos[0] = tamanho do arquivo)
+    if resto:
+        _linhas([resto])
+        est.linhas += 1
+    est.n_crlf += n_crlf
+    if regride or reaparece:
+        est.avisos.append(f"{nome}: fora de ordem ({regride} posição(ões) que regridem no mesmo cromossomo, "
+                          f"{reaparece} cromossomo(s) que reaparecem)")
+
+
+def _a_prova_de_pasta(func: Callable[..., Veredito]) -> Callable[..., Veredito]:
+    """O _a_prova_de_leitura das pastas: reprova, nunca levanta, e separa TETO (perfil
+    `teto`, 413 no registro) de recusa. `membros` = [(nome, inode)] já listados (o cache do
+    validar), para validar exatamente o que a chave do cache descreve."""
+    formato = func.__name__
+
+    @functools.wraps(func)
+    def envolto(caminho: Path, membros: Optional[list[tuple[str, int]]] = None) -> Veredito:
+        try:
+            return func(Path(caminho), membros)
+        except _TetoPasta as e:
+            return Veredito(formato, False, [str(e)], {"teto": dict(e.limite)})
+        except diretorio.ErroMembros as e:
+            return Veredito(formato, False, [str(e)], {"teto": dict(e.limite)} if e.teto else {})
+        except _Ilegivel as e:
+            return Veredito(formato, False, [str(e)])
+        except (EOFError, zlib.error):
+            return Veredito(formato, False, ["gzip truncado ou corrompido"])
+        except UnicodeDecodeError:
+            return Veredito(formato, False, ["arquivo não é texto UTF-8"])
+        except OSError as e:
+            return Veredito(formato, False, [f"arquivo ilegível ({type(e).__name__})"])
+    return envolto
+
+
+def _ler_coverages(formato: str, caminho: Path,
+                   membros: Optional[list[tuple[str, int]]]) -> tuple[Veredito, list[str]]:
+    regra = DIRETORIOS[formato]
+    with diretorio.abrir_pasta(caminho) as p:
+        if membros is None:
+            membros = [(nome, st.st_ino) for nome, st in diretorio.listar_membros(p, regra)]
+        if not membros:
+            return Veredito(formato, False, ["pasta sem membros: nenhum arquivo .cov ou .cov.gz (o R e os scripts "
+                                             "não leriam nada)"], {"n_membros": 0}), []
+        est = _LeituraCov()
+        for nome, ino in membros:
+            with os.fdopen(diretorio.abrir_membro(p, nome, ino), "rb") as f:
+                est.bytes += os.fstat(f.fileno()).st_size
+                _ler_cov_membro(f, nome, est)
+    nomes = [n for n, _ in membros]
+    falhas = est.ruins.lista()
+    perfil: dict[str, Any] = {
+        "n_membros": len(nomes), "membros": nomes[:50], "bytes": est.bytes, "n_linhas": est.linhas,
+        "descomprimido": est.descomprimido, "n_cromossomos": len(est.cromossomos), "n_crlf": est.n_crlf,
+        "avisos": est.avisos[:20]}
+    if not falhas:
+        perfil["cromossomos"] = list(est.cromossomos)
+    return Veredito(formato, not falhas, falhas, perfil), nomes
+
+
+@_a_prova_de_pasta
+def coverages_bismark(caminho: Path, membros: Optional[list[tuple[str, int]]] = None) -> Veredito:
+    """PASTA de coverages Bismark (entrada da epigenômica, só por cópia). Membros pela regra de
+    DIRETORIOS (.cov e .cov.gz); 0 membros reprova. Cada .cov.gz é lido em todos os membros gzip,
+    com razão de compressão ≤ MAX_RAZAO_GZIP acima de 1 MiB, por membro e somando os .cov.gz da
+    pasta (em fluxo: a bomba partida em membros < 1 MiB reprova); .cov não pode ser gzip. Linha: 6
+    campos por TAB, CRLF aceito (o demo é CRLF dentro do gzip), '\\r' isolado, linha vazia e
+    cabeçalho reprovam; cromossomo [A-Za-z0-9_.-]{1,64}; 1 ≤ início ≤ fim; pct em [0,100]
+    coerente com m/(m+u) a 1e-6; m+u ≥ 1. Tetos por membro (50 M linhas, 4 GiB) e por pasta
+    (MAX_LINHAS_PASTA, MAX_DESCOMPRIMIDO_PASTA), em fluxo; 10 000 cromossomos."""
+    return _ler_coverages("coverages_bismark", caminho, membros)[0]
+
+
+@_a_prova_de_pasta
+def coverages_por_condicao(caminho: Path, membros: Optional[list[tuple[str, int]]] = None) -> Veredito:
+    """Porta montar.coverages: tudo de coverages_bismark e mais — todo membro é
+    '<nivel>__<amostra>.bismark.cov.gz' (gzip), o nível passa em _problema_nivel, e a disjunção
+    por SUBSTRING vale entre os nomes (metilacao_dmc.R:32-33 com fixed=TRUE e perfil_tss.py:76-77
+    escolhem o grupo por substring do nome do arquivo)."""
+    v, nomes = _ler_coverages("coverages_por_condicao", caminho, membros)
+    ruins = _Ocorrencias()
+    por_condicao: dict[str, list[str]] = {}
+    for nome in nomes:
+        if not nome.endswith(_SUFIXO_POR_CONDICAO):
+            ruins.add("membro que não é '<condição>__<amostra>.bismark.cov.gz' (o montar grava só gzip com esse "
+                      "nome)", nome)
+            continue
+        nivel, sep, amostra = nome[:-len(_SUFIXO_POR_CONDICAO)].partition("__")
+        if not sep or not nivel or not amostra:
+            ruins.add("membro sem '<condição>__' no nome: o grupo sai do nome do arquivo", nome)
+            continue
+        problema = _problema_nivel(nivel)
+        if problema:
+            ruins.add(f"condição do nome: {problema}", nome)
+            continue
+        por_condicao.setdefault(nivel, []).append(nome)
+    falhas = ruins.lista()
+    for nivel, proprios in sorted(por_condicao.items()):
+        alheios = sorted(n for n in nomes if nivel in n and n not in proprios)
+        if alheios:
+            falhas.append(f"a condição {_nome_seguro(nivel)} casa por SUBSTRING com {len(alheios)} arquivo(s) de outra "
+                          f"condição (ex.: {alheios[0]}): o metilacao_dmc.R e o perfil_tss.py juntariam os grupos")
+    perfil = dict(v.perfil)
+    if not falhas:
+        perfil["por_condicao"] = {k: len(x) for k, x in sorted(por_condicao.items())}
+    return Veredito("coverages_por_condicao", v.ok and not falhas, v.falhas + falhas, perfil)
+
+
+class _ChaveRepetida(ValueError):
+    """Chave repetida num objeto JSON (o json do Python fica com a ÚLTIMA, sem aviso)."""
+
+
+def _objeto_sem_repetidas(pares: list[tuple[str, Any]]) -> dict[str, Any]:
+    d: dict[str, Any] = {}
+    for k, v in pares:
+        if k in d:
+            raise _ChaveRepetida(k)
+        d[k] = v
+    return d
+
+
+def _ler_painel_json(caminho: Path) -> Any:
+    """O painel como o json.loads(read_text()) dos scripts, recusando o que eles aceitariam
+    calados: chave repetida, NaN/Infinity, decimal que estoura. BOM: o json.loads recusa."""
+    if caminho.stat().st_size > _MAX_PAINEL_JSON:
+        raise _Teto(f"painel com mais de {_MAX_PAINEL_JSON} bytes")
+    bruto = caminho.read_bytes()
+    if bruto.startswith(b"\xef\xbb\xbf"):
+        raise _Teto("BOM UTF-8 no início: o json.loads dos scripts recusa o arquivo")
+    texto = bruto.decode("utf-8")
+
+    def _recusa(_nome: str) -> None:
+        raise NaoFinito("NaN/Infinity")
+
+    def _decimal(t: str) -> float:
+        x = float(t)
+        if not math.isfinite(x):
+            raise NaoFinito("decimal que estoura")
+        return x
+    return json.loads(texto, object_pairs_hook=_objeto_sem_repetidas, parse_constant=_recusa, parse_float=_decimal)
+
+
+def _eh_int(x: Any) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
+@_a_prova_de_leitura
+def painel_genes_json(caminho: Path) -> Veredito:
+    """painel_<n>.json: {"genes": {símbolo: {cromossomo, inicio, fim, fita, ensembl_id?}}, "_meta"?},
+    lido por perfil_tss.py, mofa_preparar.py e painel_janelas.py. A fita é o ponto fino: os
+    scripts testam `fita >= 0`, então 0, true e "1" virariam fita + (TSS no início) — só 1 e -1
+    como inteiros passam. bool não vale como inteiro em lugar nenhum."""
+    try:
+        dados = _ler_painel_json(caminho)
+    except _ChaveRepetida:
+        return Veredito("painel_genes_json", False, ["chave repetida no JSON: o json do Python fica com a ÚLTIMA, "
+                                                     "sem aviso"])
+    except NaoFinito:
+        return Veredito("painel_genes_json", False, ["número não finito (NaN/Infinity) no painel"])
+    except json.JSONDecodeError as e:
+        return Veredito("painel_genes_json", False, [f"JSON ilegível: {str(e)[:80]}"])
+    except RecursionError:
+        return Veredito("painel_genes_json", False, ["JSON aninhado fundo demais para ler"])
+    except _Teto as e:
+        return Veredito("painel_genes_json", False, [str(e)])
+    except UnicodeDecodeError:
+        raise
+    except ValueError as e:
+        return Veredito("painel_genes_json", False, [f"JSON ilegível ({type(e).__name__})"])
+    if not isinstance(dados, dict):
+        return Veredito("painel_genes_json", False, ["a raiz do JSON não é objeto: os scripts fazem dados['genes']"])
+    genes = dados.get("genes")
+    if not isinstance(genes, dict) or not genes:
+        return Veredito("painel_genes_json", False, ["'genes' ausente, vazio ou não é objeto {símbolo: {...}}"])
+    if len(genes) > _MAX_GENES_PAINEL:
+        return Veredito("painel_genes_json", False, [f"mais de {_MAX_GENES_PAINEL} genes"])
+    ruins = _Ocorrencias()
+    cromossomos: dict[str, None] = {}
+    n_neg = n_sem_ens = 0
+    for simbolo, g in genes.items():
+        pos = f"gene {_nome_seguro(simbolo)}"
+        if not _SIMBOLO.fullmatch(simbolo):
+            ruins.add("símbolo fora de [A-Za-z0-9._()-]{1,64} (vai para a 4ª coluna do BED e para a chave GENE)", pos)
+            continue
+        if not isinstance(g, dict):
+            ruins.add("gene não é objeto", pos)
+            continue
+        crom = g.get("cromossomo")
+        if isinstance(crom, bool) or not isinstance(crom, (str, int)) or not _CROM.fullmatch(str(crom)):
+            ruins.add("cromossomo ausente, ou não é texto/inteiro em [A-Za-z0-9_.-]{1,64}", pos)
+        else:
+            cromossomos[str(crom)] = None
+        ini, fim = g.get("inicio"), g.get("fim")
+        if not (_eh_int(ini) and _eh_int(fim)):
+            ruins.add("inicio/fim ausente ou não inteiro (bool e decimal não valem)", pos)
+        elif not 1 <= ini <= fim < 2 ** 31:
+            ruins.add("inicio/fim fora de 1 ≤ inicio ≤ fim < 2^31", pos)
+        fita = g.get("fita")
+        if not _eh_int(fita) or fita not in (1, -1):
+            ruins.add("fita fora de {1, -1} como inteiro: 0, true e '1' viram fita + no perfil_tss.py e no "
+                      "mofa_preparar.py (que testam fita >= 0)", pos)
+        elif fita == -1:
+            n_neg += 1
+        ens = g.get("ensembl_id", "")
+        if not isinstance(ens, str) or not _ENSEMBL.fullmatch(ens):
+            ruins.add("ensembl_id fora de [A-Za-z0-9_.-]{0,64}", pos)
+        elif not ens:
+            n_sem_ens += 1
+    falhas = ruins.lista()
+    ok = not falhas
+    perfil: dict[str, Any] = {"n_genes": len(genes), "n_fita_negativa": n_neg, "n_sem_ensembl": n_sem_ens,
+                              "tem_meta": "_meta" in dados}
+    if ok:
+        perfil["cromossomos"] = list(cromossomos)
+    return Veredito("painel_genes_json", ok, falhas, perfil)
+
+
+@_a_prova_de_leitura
+def painel_bed(caminho: Path) -> Veredito:
+    """janelas.bed do painel_janelas.py ('<crom>\\t<ini>\\t<fim>\\t<gene>\\t<ensembl>', LF), lido
+    pelo intersecao_dmc_painel.py (split('\\t'), int()). Exatamente 5 campos (o 5º pode ser
+    vazio); sem cabeçalho nem 'track'; início < fim; gene único; de 1 a 10 000 linhas."""
+    ruins = _Ocorrencias()
+    genes: set[str] = set()
+    cromossomos: dict[str, None] = {}
+    n = 0
+    for k, linha in _linhas_lf(caminho, _MAX_SIMBOLOS, f"mais de {_MAX_SIMBOLOS} janelas (teto da leitura)"):
+        if linha.endswith("\r"):
+            ruins.add("quebra de linha CRLF: o painel_janelas grava LF", f"linha {k}")
+            continue
+        if not linha:
+            ruins.add("linha vazia", f"linha {k}")
+            continue
+        if linha.startswith(("#", "track", "browser")):
+            ruins.add("linha de cabeçalho/track: o intersecao_dmc_painel.py faz int() do 2º campo", f"linha {k}")
+            continue
+        c = linha.split("\t")
+        if len(c) != 5:
+            ruins.add("nº de campos diferente de 5 (cromossomo, início, fim, gene, ensembl)", f"linha {k}")
+            continue
+        n += 1
+        crom, ini, fim, gene, ens = c
+        if not _CROM.fullmatch(crom):
+            ruins.add("cromossomo fora de [A-Za-z0-9_.-]{1,64}", f"linha {k}")
+        else:
+            cromossomos[crom] = None
+        if not (_INT_CURTO.fullmatch(ini) and _INT_CURTO.fullmatch(fim)) or int(ini) >= int(fim):
+            ruins.add("início/fim não inteiros ou início ≥ fim", f"linha {k}")
+        if not _SIMBOLO.fullmatch(gene):
+            ruins.add("gene fora de [A-Za-z0-9._()-]{1,64}", f"linha {k}")
+        elif gene in genes:
+            ruins.add("gene repetido (é a chave da interseção)", f"linha {k}")
+        genes.add(gene)
+        if not _ENSEMBL.fullmatch(ens):
+            ruins.add("ensembl fora de [A-Za-z0-9_.-]{0,64}", f"linha {k}")
+    falhas = ruins.lista()
+    if not n:
+        falhas.append("nenhuma janela")
+    ok = not falhas
+    perfil: dict[str, Any] = {"n_janelas": n}
+    if ok:
+        perfil["cromossomos"] = list(cromossomos)
+    return Veredito("painel_bed", ok, falhas, perfil)
+
+
+def _tabela_methylkit(caminho: Path, formato: str, *, dmc: bool) -> Veredito:
+    """dmc.tsv e todas_cpgs.tsv: o write.table(quote=FALSE, row.names=FALSE) de
+    metilacao_dmc.R:55,61. Cabeçalho exato, 7 campos, start/end inteiros sem notação científica,
+    strand em + - *, p/q em [0,1] (com expoente), meth.diff em [-100,100] e chave chr:start única."""
+    teto = (_MAX_LINHAS_METHYLKIT, f"mais de {_MAX_LINHAS_METHYLKIT} linhas (teto da leitura)")
+    with _abrir(caminho, aparar_cabecalho=False, teto=teto) as t:
+        if tuple(t.cab) != _CAB_METHYLKIT:
+            return Veredito(formato, False, ["cabeçalho diferente de 'chr start end strand pvalue qvalue meth.diff' "
+                                             "(o write.table do methylKit, separado por TAB)"] + t.falha_aspas())
+        ruins = _Ocorrencias()
+        chaves: set[int] = set()
+        n = n_q_na = n_zero = n_hiper = n_hipo = 0
+        for k, linha in t.linhas():
+            if len(linha) != 7:
+                ruins.add("nº de campos diferente de 7 (coluna de row.names? o write.table com row.names=TRUE grava "
+                          "8)", f"linha {k}")
+                continue
+            n += 1
+            crom, ini, fim, fita, tp, tq, td = linha
+            if not _CROM.fullmatch(crom):
+                ruins.add("chr fora de [A-Za-z0-9_.-]{1,64}", f"linha {k}")
+            if not (_INT_CURTO.fullmatch(ini) and _INT_CURTO.fullmatch(fim)):
+                ruins.add("start/end não são inteiros (notação científica ou NA)", f"linha {k}")
+            if fita not in ("+", "-", "*"):
+                ruins.add("strand fora de + - *", f"linha {k}")
+            for nome, tv in (("pvalue", tp), ("qvalue", tq)):
+                if tv == "NA":
+                    if dmc:
+                        ruins.add(f"{nome} NA numa DMC", f"linha {k}")
+                    elif nome == "qvalue":
+                        n_q_na += 1
+                    continue
+                x = _decimal_finito(tv)
+                if x is None or not 0.0 <= x <= 1.0:
+                    ruins.add(f"{nome} fora de [0,1] ou não decimal", f"linha {k}")
+            if td == "NA":
+                if dmc:
+                    ruins.add("meth.diff NA numa DMC", f"linha {k}")
+            else:
+                d = _decimal_finito(td)
+                if d is None or not -100.0 <= d <= 100.0:
+                    ruins.add("meth.diff fora de [-100,100] ou não decimal (inf/NaN)", f"linha {k}")
+                elif d == 0:
+                    n_zero += 1
+                    if dmc:
+                        ruins.add("meth.diff = 0 numa DMC: é o sinal de todas_cpgs.tsv no lugar do dmc.tsv (a "
+                                  "interseção contaria a linha como hipo)", f"linha {k}")
+                elif d > 0:
+                    n_hiper += 1
+                else:
+                    n_hipo += 1
+            h = _chave_hash(crom, ini)
+            if h in chaves:
+                ruins.add("chave chr:start repetida", f"linha {k}")
+            chaves.add(h)
+        falhas = ruins.lista() + t.falha_aspas()
+    if not dmc and not n:
+        falhas.append("tabela sem CpGs: o teste do methylKit não devolveu nenhuma linha")
+    perfil = ({"n_dmc": n, "n_hiper": n_hiper, "n_hipo": n_hipo} if dmc
+              else {"n_cpgs": n, "n_q_na": n_q_na, "n_diff_zero": n_zero})
+    return Veredito(formato, not falhas, falhas, perfil)
+
+
+@_a_prova_de_leitura
+def dmc_methylkit(caminho: Path) -> Veredito:
+    """dmc.tsv (as DMCs do getMethylDiff): sem NA e sem meth.diff = 0 (o sinal de todas_cpgs.tsv
+    no lugar errado; o demo tem 1.781 zeros e a interseção os contaria como hipo). 0 linhas é
+    aceito (nenhuma DMC é um resultado)."""
+    return _tabela_methylkit(caminho, "dmc_methylkit", dmc=True)
+
+
+@_a_prova_de_leitura
+def cpgs_methylkit(caminho: Path) -> Veredito:
+    """todas_cpgs.tsv (o getData do calculateDiffMeth, sem filtro): aceita NA (contado), ≥1
+    linha, até 10 M linhas."""
+    return _tabela_methylkit(caminho, "cpgs_methylkit", dmc=False)
+
+
+@_a_prova_de_leitura
+def tabela_intersecao_painel(caminho: Path) -> Veredito:
+    """intersecao.tsv (intersecao_dmc_painel.py:66-70): cabeçalho exato `GENE N_DMC HIPER
+    HIPO`, GENE único, N_DMC ≥ 1, HIPER + HIPO = N_DMC, N_DMC em ordem não crescente. 0 linhas é
+    aceito (nenhuma DMC no painel)."""
+    teto = (_MAX_SIMBOLOS, f"mais de {_MAX_SIMBOLOS} genes (teto da leitura)")
+    with _abrir(caminho, aparar_cabecalho=False, teto=teto) as t:
+        if t.cab != ["GENE", "N_DMC", "HIPER", "HIPO"]:
+            return Veredito("tabela_intersecao_painel", False, ["cabeçalho diferente de 'GENE N_DMC HIPER HIPO' "
+                                                                "(separados por TAB)"] + t.falha_aspas())
+        ruins = _Ocorrencias()
+        genes: set[str] = set()
+        n = soma = 0
+        ant = math.inf
+        topo = None
+        for k, linha in t.linhas():
+            if len(linha) != 4:
+                ruins.add("nº de campos diferente de 4", f"linha {k}")
+                continue
+            n += 1
+            gene, tn, th, to = linha
+            if not _SIMBOLO.fullmatch(gene):
+                ruins.add("GENE fora de [A-Za-z0-9._()-]{1,64}", f"linha {k}")
+            elif gene in genes:
+                ruins.add("GENE repetido", f"linha {k}")
+            genes.add(gene)
+            if not all(_INT_CURTO.fullmatch(x) for x in (tn, th, to)):
+                ruins.add("N_DMC/HIPER/HIPO não são inteiros", f"linha {k}")
+                continue
+            nd, hi, ho = int(tn), int(th), int(to)
+            if nd < 1:
+                ruins.add("N_DMC < 1: o script só grava gene com DMC", f"linha {k}")
+            if hi + ho != nd:
+                ruins.add("HIPER + HIPO ≠ N_DMC", f"linha {k}")
+            if nd > ant:
+                ruins.add("N_DMC crescente: o script grava em ordem não crescente", f"linha {k}")
+            ant = nd
+            soma += nd
+            topo = topo or (gene if _SIMBOLO.fullmatch(gene) else None)
+        falhas = ruins.lista() + t.falha_aspas()
+    perfil: dict[str, Any] = {"n_genes": n, "soma_n_dmc": soma}
+    if not falhas:
+        perfil["gene_topo"] = topo
+    return Veredito("tabela_intersecao_painel", not falhas, falhas, perfil)
+
+
+@_a_prova_de_leitura
+def tabela_motifs_homer(caminho: Path) -> Veredito:
+    """motifs_top.tsv (motifs_homer.py:82-90): cabeçalho exato `MOTIF P_VALUE Q_VALUE`, de 1 a
+    15 linhas (o script para em 15), MOTIF não vazio (sem exigir unicidade: o HOMER repete nome
+    de motivo de bases diferentes), P e Q em [0,1], P em ordem não decrescente."""
+    with _abrir(caminho, aparar_cabecalho=False, teto=(100, "mais de 100 linhas: o script grava no máximo 15")) as t:
+        if t.cab != ["MOTIF", "P_VALUE", "Q_VALUE"]:
+            return Veredito("tabela_motifs_homer", False, ["cabeçalho diferente de 'MOTIF P_VALUE Q_VALUE' "
+                                                           "(separados por TAB)"] + t.falha_aspas())
+        ruins = _Ocorrencias()
+        n = n_q = 0
+        ant = -math.inf
+        topo = None
+        for k, linha in t.linhas():
+            if len(linha) != 3:
+                ruins.add("nº de campos diferente de 3", f"linha {k}")
+                continue
+            n += 1
+            motivo, tp, tq = linha
+            if not motivo.strip() or not motivo.isprintable():
+                ruins.add("MOTIF vazio ou com caractere de controle", f"linha {k}")
+            p, q = _decimal_finito(tp), _decimal_finito(tq)
+            if p is None or q is None or not (0.0 <= p <= 1.0 and 0.0 <= q <= 1.0):
+                ruins.add("P_VALUE/Q_VALUE fora de [0,1] ou não decimal", f"linha {k}")
+                continue
+            if p < ant:
+                ruins.add("P_VALUE decrescente: o HOMER ranqueia do menor p para o maior", f"linha {k}")
+            ant = p
+            n_q += q < 0.05
+            topo = topo or _nome(motivo, 64)
+        falhas = ruins.lista() + t.falha_aspas()
+    if not n:
+        falhas.append("nenhum motivo")
+    if n > 15:
+        falhas.append(f"{n} linhas: o script grava no máximo 15")
+    perfil: dict[str, Any] = {"n_linhas": n, "n_q_lt_0_05": n_q}
+    if not falhas:
+        perfil["motif_topo"] = topo
+    return Veredito("tabela_motifs_homer", not falhas, falhas, perfil)
+
+
+@_a_prova_de_leitura
+def view_mofa(caminho: Path) -> Veredito:
+    """view_promotor/view_corpo.tsv (mofa_preparar.py:107-110), lidas pelo _ler_view do
+    mofa_treinar (csv.reader; 'NA' → NaN, o resto float()): 1ª coluna `feature`, ≥4 amostras
+    (mofa_preparar.py:75-76) com nomes únicos no padrão de membro, feature única, valor 'NA' ou
+    decimal em [0,100], ≥1 linha, nenhuma linha toda NA."""
+    with _abrir(caminho, aparar_cabecalho=False, teto=(_MAX_GENES, f"mais de {_MAX_GENES} linhas (teto)")) as t:
+        cab = t.cab
+        if not cab or cab[0] != "feature":
+            return Veredito("view_mofa", False, ["1ª coluna deve ser 'feature'"] + t.falha_aspas())
+        amostras = cab[1:]
+        falhas: list[str] = []
+        if len(amostras) < 4:
+            falhas.append(f"{len(amostras)} amostra(s): o MOFA precisa de ≥4 (mofa_preparar.py:75-76)")
+        if len(set(amostras)) != len(amostras) or not all(diretorio.NOME_MEMBRO.fullmatch(a) for a in amostras):
+            falhas.append("nomes de amostra repetidos ou fora do padrão (letras ASCII, dígitos, '_', '.', '-')")
+        largura = len(cab)
+        ruins = _Ocorrencias()
+        feats: set[str] = set()
+        n = n_na = 0
+        for k, linha in t.linhas():
+            if len(linha) != largura:
+                ruins.add(f"nº de campos diferente do cabeçalho ({largura})", f"linha {k}")
+                continue
+            n += 1
+            f = linha[0]
+            if not f:
+                ruins.add("feature vazia", f"linha {k}")
+            elif f in feats:
+                ruins.add("feature repetida", f"linha {k}")
+            feats.add(f)
+            na_linha = 0
+            for j in range(1, largura):
+                v = linha[j]
+                if v == "NA":
+                    na_linha += 1
+                    continue
+                x = _decimal_finito(v)
+                if x is None or not 0.0 <= x <= 100.0:
+                    ruins.add("valor que não é 'NA' nem decimal em [0,100]", f"linha {k} coluna {j + 1}")
+            n_na += na_linha
+            if na_linha == largura - 1:
+                ruins.add("linha com todas as amostras NA", f"linha {k}")
+        falhas += ruins.lista() + t.falha_aspas()
+    if not n:
+        falhas.append("view sem features (só o cabeçalho)")
+    perfil: dict[str, Any] = {"n_features": n, "n_amostras": len(amostras), "n_na": n_na}
+    if not falhas:
+        perfil["amostras"] = amostras[:50]
+    return Veredito("view_mofa", not falhas, falhas, perfil)
+
+
+@_a_prova_de_leitura
+def tabela_variancia_mofa(caminho: Path) -> Veredito:
+    """variancia_explicada.tsv (mofa_treinar.py:114-117): cabeçalho exato `fator promotor corpo`,
+    linhas Factor1..FactorK em sequência (K ≥ 2), R² em [-100,100] (o script aborta fora disso)."""
+    with _abrir(caminho, aparar_cabecalho=False, teto=(1000, "mais de 1000 fatores (teto)")) as t:
+        if t.cab != ["fator", "promotor", "corpo"]:
+            return Veredito("tabela_variancia_mofa", False, ["cabeçalho diferente de 'fator promotor corpo' "
+                                                             "(separados por TAB)"] + t.falha_aspas())
+        ruins = _Ocorrencias()
+        n = 0
+        for k, linha in t.linhas():
+            if len(linha) != 3:
+                ruins.add("nº de campos diferente de 3", f"linha {k}")
+                continue
+            n += 1
+            if linha[0] != f"Factor{n}":
+                ruins.add(f"fator fora de sequência (esperava Factor{n})", f"linha {k}")
+            for v in linha[1:]:
+                x = _decimal_finito(v)
+                if x is None or not -100.0 <= x <= 100.0:
+                    ruins.add("R² não é decimal finito em [-100,100] (nan/inf?)", f"linha {k}")
+                    break
+        falhas = ruins.lista() + t.falha_aspas()
+    if n < 2:
+        falhas.append(f"{n} fator(es): o MOFA desta plataforma treina K ≥ 2")
+    return Veredito("tabela_variancia_mofa", not falhas, falhas, {"n_fatores": n})
+
+
+@_a_prova_de_leitura
+def fatores_mofa(caminho: Path) -> Veredito:
+    """fatores_por_amostra.tsv do mofa_treinar_api.py: cabeçalho `amostra condicao
+    Factor1..FactorK` (K ≥ 2), amostra única, condição não vazia, fatores decimais finitos, ≥4
+    amostras."""
+    with _abrir(caminho, aparar_cabecalho=False, teto=(_MAX_AMOSTRAS, f"mais de {_MAX_AMOSTRAS} amostras")) as t:
+        cab = t.cab
+        k_fat = len(cab) - 2
+        if cab[:2] != ["amostra", "condicao"] or k_fat < 2 or cab[2:] != [f"Factor{i}" for i in range(1, k_fat + 1)]:
+            return Veredito("fatores_mofa", False, ["cabeçalho diferente de 'amostra condicao Factor1 … FactorK' "
+                                                    "(K ≥ 2, em sequência)"] + t.falha_aspas())
+        largura = len(cab)
+        ruins = _Ocorrencias()
+        amostras: set[str] = set()
+        por_condicao: Counter[str] = Counter()
+        for k, linha in t.linhas():
+            if len(linha) != largura:
+                ruins.add(f"nº de campos diferente do cabeçalho ({largura})", f"linha {k}")
+                continue
+            a, c = linha[0], linha[1]
+            if not a:
+                ruins.add("amostra vazia", f"linha {k}")
+            elif a in amostras:
+                ruins.add("amostra repetida", f"linha {k}")
+            amostras.add(a)
+            if not c or c != c.strip():
+                ruins.add("condição vazia ou com espaço em volta", f"linha {k}")
+            else:
+                por_condicao[c] += 1
+            if any(_decimal_finito(v) is None for v in linha[2:]):
+                ruins.add("fator não é decimal finito (nan/inf?)", f"linha {k}")
+        falhas = ruins.lista() + t.falha_aspas()
+    if len(amostras) < 4:
+        falhas.append(f"{len(amostras)} amostra(s): o MOFA precisa de ≥4")
+    perfil: dict[str, Any] = {"n_amostras": len(amostras), "n_fatores": k_fat}
+    if not falhas:
+        perfil["por_condicao"] = {_nome_seguro(c): n for c, n in sorted(por_condicao.items())}
+    return Veredito("fatores_mofa", not falhas, falhas, perfil)
+
+
 VALIDADORES: dict[str, Callable[[Path], Veredito]] = {
     "contagens_genes": contagens_genes,
     "coldata": coldata,
@@ -1419,6 +2621,25 @@ VALIDADORES: dict[str, Callable[[Path], Veredito]] = {
     "contagem_efeitos_snpeff": contagem_efeitos_snpeff,
     "tabela_vep": tabela_vep,
     "contagem_consequencias_vep": contagem_consequencias_vep,
+    # ML (F6)
+    "rotulos_amostras": rotulos_amostras,
+    "lista_amostras": lista_amostras,
+    "matriz_marcadores": matriz_marcadores,
+    "rotulos_grupos": rotulos_grupos,
+    "tabela_shap": tabela_shap,
+    "tabela_nucleo_estavel": tabela_nucleo_estavel,
+    # epigenômica (F6); os dois coverages_* são PASTA (DIRETORIOS)
+    "coverages_bismark": coverages_bismark,
+    "coverages_por_condicao": coverages_por_condicao,
+    "painel_genes_json": painel_genes_json,
+    "painel_bed": painel_bed,
+    "dmc_methylkit": dmc_methylkit,
+    "cpgs_methylkit": cpgs_methylkit,
+    "tabela_intersecao_painel": tabela_intersecao_painel,
+    "tabela_motifs_homer": tabela_motifs_homer,
+    "view_mofa": view_mofa,
+    "tabela_variancia_mofa": tabela_variancia_mofa,
+    "fatores_mofa": fatores_mofa,
 }
 
 # extensão com que uma ENTRADA de run é gravada em raw/runs/<run_id>/ (o script lê pelo
@@ -1432,6 +2653,12 @@ EXTENSOES: dict[str, str] = {
     "painel_simbolos": ".txt", "bed_regioes": ".bed", "vcf_indexado": ".vcf.gz", "indice_vcf": ".tbi",
     "vcf_anotado_snpeff": ".vcf.gz", "tabela_frequencias": ".tsv", "contagem_efeitos_snpeff": ".tsv",
     "contagem_consequencias_vep": ".tsv", "tabela_vep": ".tsv",
+    # F6 (os formatos de PASTA não entram: a cópia preserva o nome da pasta e dos membros)
+    "rotulos_amostras": ".tsv", "lista_amostras": ".txt", "matriz_marcadores": ".tsv",
+    "rotulos_grupos": ".tsv", "tabela_shap": ".tsv", "tabela_nucleo_estavel": ".tsv",
+    "painel_genes_json": ".json", "painel_bed": ".bed", "dmc_methylkit": ".tsv", "cpgs_methylkit": ".tsv",
+    "tabela_intersecao_painel": ".tsv", "tabela_motifs_homer": ".tsv", "view_mofa": ".tsv",
+    "tabela_variancia_mofa": ".tsv", "fatores_mofa": ".tsv",
 }
 
 # Sufixos ACEITOS no nome de um formato cujo nome muda a leitura (a regra de nome exige um
@@ -1455,17 +2682,45 @@ IRMAOS: dict[str, dict[str, tuple[str, ...]]] = {
 # cópia): só o VCF/BCF indexado — o validador custa milissegundos num BCF de 2 GB.
 REFERENCIAVEIS: frozenset[str] = frozenset({"vcf_indexado"})
 
+# Formatos de PASTA (F6, ESPEC §1.A.2): a regra de membros que fica congelada no registro e no
+# plano. A leitura é a união do list.files(pattern="\\.cov(\\.gz)?$") do R (metilacao_dmc.R:31)
+# com os glob '*.cov.gz' e '*.cov' do Python (perfil_tss.py:75, mofa_preparar.py:74).
+# DIRETORIOS ⊆ VALIDADORES; fora de EXTENSOES, de REFERENCIAVEIS e dos alvos do adaptador.
+DIRETORIOS: dict[str, dict[str, Any]] = {
+    "coverages_bismark": {"leitura": r"\.cov(?:\.gz)?\Z", "fixos": None},
+    "coverages_por_condicao": {"leitura": r"\.cov(?:\.gz)?\Z", "fixos": None},
+}
+
 COLUNAS_GARANTIDAS.update({
     "tabela_frequencias": tuple(_CAB_FREQ),
     "contagem_efeitos_snpeff": ("EFEITO", "N"),
     "contagem_consequencias_vep": ("CONSEQUENCIA", "N"),
+    # F6
+    "rotulos_amostras": ("amostra", "grupo"), "rotulos_grupos": ("amostra", "grupo"),
+    "matriz_marcadores": (), "tabela_shap": ("VARIANTE", "SHAP_MEDIO_ABS"),
+    "tabela_nucleo_estavel": ("MARCADOR", "FREQ_BOOTSTRAP", "RECORRENCIA_FOLDS"),
+    "dmc_methylkit": _CAB_METHYLKIT, "cpgs_methylkit": _CAB_METHYLKIT,
+    "tabela_intersecao_painel": ("GENE", "N_DMC", "HIPER", "HIPO"),
+    "tabela_motifs_homer": ("MOTIF", "P_VALUE", "Q_VALUE"), "view_mofa": ("feature",),
+    "tabela_variancia_mofa": ("fator", "promotor", "corpo"), "fatores_mofa": ("amostra", "condicao"),
 })
+COLUNAS_DE_NIVEL.update({"rotulos_amostras": ("grupo",)})
 # tabela_frequencias NÃO entra: a chave dela é composta (CHROM:POS:REF:ALT) e a de
-# relatorio.tabelas é uma coluna só (G1 §0.9)
+# relatorio.tabelas é uma coluna só (G1 §0.9). Os methylKit também não (chave chr:start).
 COLUNAS_CHAVE.update({
     "contagem_efeitos_snpeff": ("EFEITO",),
     "contagem_consequencias_vep": ("CONSEQUENCIA",),
+    "rotulos_amostras": ("amostra",), "tabela_shap": ("VARIANTE",),
+    "tabela_nucleo_estavel": ("MARCADOR",), "tabela_intersecao_painel": ("GENE",),
+    "tabela_variancia_mofa": ("fator",),
 })
+# Chave de LINHA de uma tabela, para o desempate da recontagem por porta (adendo §A4 X3′): a
+# linha de borda (|x| a menos da tolerância do limite) conta se a sua chave está na porta de
+# desempate. Os dois lados precisam da MESMA chave; as colunas são garantidas pelo formato.
+CHAVE_LINHA: dict[str, tuple[str, ...]] = {
+    "cpgs_methylkit": ("chr", "start"),
+    "dmc_methylkit": ("chr", "start"),
+}
 
 
 # ------------------------------------------------------------- nomes (fora do conteúdo)
@@ -1575,12 +2830,59 @@ def valores_coluna(caminho: Path, coluna: str, limite: int = 50) -> Optional[lis
         return None
 
 
+def _pasta_comum(caminho: Path) -> bool:
+    """Diretório que não é symlink nem junção do NTFS (o is_symlink não vê junção)."""
+    return not caminho.is_symlink() and caminho.is_dir() and not diretorio.eh_reparse(caminho)
+
+
+def _tetos_da_pasta() -> tuple:
+    """Os tetos entram na chave do cache: um monkeypatch nos testes (ou uma troca de constante)
+    não pode receber o veredito calculado com o teto antigo."""
+    return (diretorio.MAX_LINHAS_PASTA, diretorio.MAX_DESCOMPRIMIDO_PASTA, diretorio.MAX_RAZAO_GZIP,
+            diretorio.RECUSA_HARDLINK, diretorio.MAX_MEMBROS, diretorio.MAX_VARRIDAS,
+            _MAX_LINHAS_COV, _MAX_DESCOMPRIMIDO_COV, _MAX_CROMOSSOMOS)
+
+
+@functools.lru_cache(maxsize=8)
+def _validar_pasta_cache(formato: str, caminho: str, chave: tuple) -> Veredito:
+    membros = [(nome, ino) for nome, _tam, _mt, _ct, ino in chave[3]]
+    return VALIDADORES[formato](Path(caminho), membros)
+
+
+def _validar_pasta(formato: str, caminho: Path) -> Veredito:
+    """Cache pela identidade da pasta e de CADA membro (nome, tamanho, mtime, ctime, inode), no
+    padrão do _ler_vcf. Sem ele a mesma pasta seria lida três vezes a cada registro (validação +
+    duas checagens) e de novo em todo envelope de passo posterior. A validação lê exatamente os
+    membros (nome, inode) da chave: o abrir_membro recusa o que trocou depois da listagem.
+    Devolve uma CÓPIA (o veredito do cache é compartilhado). Resíduo declarado, como no
+    _ler_vcf: no host Windows o ctime é a criação, e reescrever um membro no lugar com o mesmo
+    tamanho e o mtime devolvido não invalida (no container, sim)."""
+    regra = DIRETORIOS[formato]
+    try:
+        with diretorio.abrir_pasta(caminho) as p:
+            listados = diretorio.listar_membros(p, regra)
+            st = p.st
+    except diretorio.ErroMembros as e:
+        return Veredito(formato, False, [str(e)], {"teto": dict(e.limite)} if e.teto else {})
+    chave = (formato, str(caminho.resolve()), (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns),
+             tuple((n, s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_ino) for n, s in listados),
+             _tetos_da_pasta())
+    return copy.deepcopy(_validar_pasta_cache(formato, str(caminho), chave))
+
+
 def validar(formato: str, caminho: Path) -> Veredito:
     """Ponto único de entrada. Formato desconhecido, arquivo ausente, vazio ou ilegível = falha
-    — um portão reprova, nunca levanta (a exceção virava 500 com a entrada já no disco)."""
+    — um portão reprova, nunca levanta (a exceção virava 500 com a entrada já no disco).
+    Formato de PASTA (DIRETORIOS): symlink, junção ou não-diretório reprova ("esperava uma
+    pasta"); o resto vai ao validador de pasta, com cache. Para formato de arquivo nada muda:
+    pasta continua reprovando."""
     if formato not in VALIDADORES:
         return Veredito(formato, False, [f"formato desconhecido: {formato!r} (conhecidos: {sorted(VALIDADORES)})"])
     try:
+        if formato in DIRETORIOS:
+            if not _pasta_comum(caminho):
+                return Veredito(formato, False, [diretorio.MSG_NAO_PASTA])
+            return _validar_pasta(formato, caminho)
         if not caminho.exists():
             return Veredito(formato, False, [f"arquivo ausente: {caminho.name}"])
         if caminho.is_dir() or caminho.stat().st_size == 0:
@@ -1743,12 +3045,183 @@ def vcf_e_bed(vcf: Path, bed: Path) -> Veredito:
     return Veredito("vcf_e_bed", not falhas, falhas, perfil)
 
 
+# --------------------------------------------------------------- checagens da F6
+def _pares_tabela(caminho: Path, coluna_a: str, coluna_b: str) -> list[tuple[str, str]]:
+    """(a, b) de cada linha de uma tabela JÁ aprovada pelo validador (coldata, rotulos_amostras),
+    na ordem do arquivo. O cabeçalho é aparado como no validador do coldata."""
+    teto = (_MAX_AMOSTRAS, f"mais de {_MAX_AMOSTRAS} linhas (teto da leitura)")
+    with _abrir(caminho, teto=teto) as t:
+        ia, ib = t.cab.index(coluna_a), t.cab.index(coluna_b)
+        return [(l[ia], l[ib]) for _, l in t.linhas() if len(l) == len(t.cab)]
+
+
+@_checagem
+def vcf_e_rotulos(vcf: Path, rotulos: Path) -> Veredito:
+    """VCF/BCF × tabela de rótulos, ANTES de rodar o bcftools: o ml_dataset_genotipos descarta
+    em silêncio a amostra rotulada que não está no VCF (ml_dataset_genotipos.py:60-63) e o n do
+    resumo divergiria da tabela. Só a PRIMEIRA falha aplicável é reportada, nesta ordem (L19):
+    (1) VCF sem amostras ou sem FORMAT/GT (o demo da genômica só tem sítios); (2) amostra
+    rotulada ausente do cabeçalho. "Grupo com < 10 presentes" não dispara sozinha depois da (2)
+    — o rotulos_amostras já exige ≥ 10 — e fica como assert interno."""
+    falhas: list[str] = []
+    ruim = _vcf_aprovado(vcf, "vcf_e_rotulos")
+    if ruim:
+        falhas += ruim.falhas
+    vr = validar("rotulos_amostras", rotulos)
+    falhas += [f"rotulos: {x}" for x in vr.falhas]
+    if falhas:
+        return Veredito("vcf_e_rotulos", False, falhas)
+    r = _ler_vcf(vcf)
+    no_vcf = set(r.get("amostras", ()))
+    pares = _pares_tabela(rotulos, "amostra", "grupo")
+    presentes = [(a, g) for a, g in pares if a in no_vcf]
+    niveis = Counter(g for _, g in presentes)
+    perfil = {"n_amostras_vcf": len(no_vcf), "n_rotuladas": len(pares),
+              "n_vcf_sem_rotulo": len(no_vcf - {a for a, _ in pares}),
+              "niveis_no_vcf": dict(sorted(niveis.items())[:50])}
+    if not no_vcf or "GT" not in r.get("format", frozenset()):
+        return Veredito("vcf_e_rotulos", False, [
+            "VCF sem amostras com genótipo (FORMAT/GT): só sítios, nada para a matriz 0/1/2"], perfil)
+    ausentes = [a for a, _ in pares if a not in no_vcf]
+    if ausentes:
+        return Veredito("vcf_e_rotulos", False, [
+            f"{len(ausentes)} amostra(s) rotulada(s) ausente(s) do cabeçalho do VCF (ex.: {_nome_seguro(ausentes[0])}): "
+            "o ml_dataset_genotipos as descartaria em silêncio e o n do resumo divergiria da tabela"], perfil)
+    assert all(n >= _MIN_POR_NIVEL_ML for n in niveis.values()), "rotulos_amostras aprovou grupo com < 10"
+    return Veredito("vcf_e_rotulos", True, [], perfil)
+
+
+@_checagem
+def coverages_e_amostras(coverages: Path, amostras: Path) -> Veredito:
+    """Pasta de coverages × coldata (amostra → condição), ANTES do plano — o mesmo que o
+    montar_coverages confere de novo no job. A `amostra` é o stem do arquivo por igualdade
+    exata (decisão 7). Reprovam: dois arquivos da mesma amostra (x.cov e x.cov.gz); amostras
+    que só diferem na caixa (crítica M10: no NTFS os nomes finais se sobrescrevem); amostra
+    sem arquivo; nome final '<condicao>__<amostra>.bismark.cov.gz' fora de NOME_MEMBRO, longo
+    demais ou repetido sem caixa; e a disjunção por SUBSTRING entre os nomes finais
+    (metilacao_dmc.R:32-33, perfil_tss.py:76-77)."""
+    vc, va = validar("coverages_bismark", coverages), validar("coldata", amostras)
+    falhas = [f"coverages: {x}" for x in vc.falhas] + [f"amostras: {x}" for x in va.falhas]
+    perfil: dict[str, Any] = {}
+    if vc.ok and va.ok:
+        nomes = [n for n, _ in diretorio.listar_membros(coverages, DIRETORIOS["coverages_bismark"])]
+        por_stem: dict[str, str] = {}
+        dobras: dict[str, str] = {}
+        for nome in nomes:
+            s = stem_coverage(nome)
+            if s is None:
+                continue
+            if s in por_stem:
+                falhas.append(f"dois arquivos da mesma amostra ({por_stem[s]} e {nome}): o montar não saberia qual "
+                              "copiar")
+                continue
+            if s.casefold() in dobras:
+                falhas.append(f"amostras que só diferem na caixa ({dobras[s.casefold()]} × {s}): no NTFS os nomes "
+                              "finais se sobrescreveriam e o DMC rodaria com uma amostra a menos")
+                continue
+            por_stem[s] = nome
+            dobras[s.casefold()] = s
+        pares = _pares_tabela(amostras, "amostra", "condicao")
+        do_coldata = {a for a, _ in pares}
+        sem_arquivo = [a for a, _ in pares if a not in por_stem]
+        if sem_arquivo:
+            falhas.append(f"{len(sem_arquivo)} amostra(s) do coldata sem arquivo na pasta (ex.: "
+                          f"{_nome_seguro(sem_arquivo[0])}): a amostra é o nome do arquivo sem .bismark.cov.gz/.cov.gz/"
+                          ".bismark.cov/.cov, por igualdade exata")
+        finais: dict[str, str] = {}
+        dobras_finais: set[str] = set()
+        for a, c in pares:
+            if a not in por_stem:
+                continue
+            final = nome_por_condicao(c, a)
+            if not diretorio.NOME_MEMBRO.fullmatch(final):
+                falhas.append(f"nome final de {_nome_seguro(a)} fora do padrão de membro (até 128 caracteres; só "
+                              "letras ASCII, dígitos, '_', '.', '-')")
+                continue
+            if final.casefold() in dobras_finais:
+                falhas.append(f"nome final repetido sem distinção de caixa ({_nome_seguro(a)}): no NTFS um "
+                              "sobrescreveria o outro")
+                continue
+            dobras_finais.add(final.casefold())
+            finais[final] = c
+        for nivel in sorted({c for _, c in pares}):
+            alheios = sorted(n for n, c in finais.items() if nivel in n and c != nivel)
+            if alheios:
+                quem = (f"a condição {nivel}" if _NOME_ECOAVEL.fullmatch(nivel) else "uma condição")
+                falhas.append(f"{quem} casa por SUBSTRING com {len(alheios)} arquivo(s) de outra condição: o "
+                              "metilacao_dmc.R e o perfil_tss.py escolhem o grupo por substring do nome e juntariam "
+                              "os grupos; renomeie a condição")
+        sem_amostra = sorted(n for s, n in por_stem.items() if s not in do_coldata)
+        perfil = {"n_amostras": len(finais), "por_condicao": dict(sorted(Counter(finais.values()).items())),
+                  "n_arquivos_sem_amostra": len(sem_amostra), "arquivos_sem_amostra": sem_amostra[:20]}
+    return Veredito("coverages_e_amostras", not falhas, falhas, perfil)
+
+
+@_checagem
+def coverages_e_painel(coverages: Path, painel: Path) -> Veredito:
+    """Pasta de coverages × painel JSON: nenhum cromossomo em comum reprova (o caso típico é
+    'chr1' × '1', em que a interseção daria 0 genes com código 0). Não conta CpG por janela: o
+    perfil_tss já aborta sem CpG (perfil_tss.py:89-92)."""
+    vc, vp = validar("coverages_bismark", coverages), validar("painel_genes_json", painel)
+    falhas = [f"coverages: {x}" for x in vc.falhas] + [f"painel: {x}" for x in vp.falhas]
+    perfil: dict[str, Any] = {}
+    if vc.ok and vp.ok:
+        cov = set(vc.perfil["cromossomos"])
+        genes = _ler_painel_json(painel)["genes"]
+        crom_genes = [str(g["cromossomo"]) for g in genes.values()]
+        comuns = sorted(cov & set(crom_genes))
+        ausentes = sum(c not in cov for c in crom_genes)
+        if not comuns:
+            falhas.append("nenhum cromossomo em comum entre os coverages e o painel (ex.: coverages 'chr1' × painel "
+                          "'1'): a interseção e o TSS dariam 0 genes, com código 0")
+        avisos = ([f"{ausentes} gene(s) do painel em cromossomo(s) sem coverage: ficam fora da interseção, do TSS e "
+                   "das views"] if ausentes and comuns else [])
+        perfil = {"cromossomos_comuns": [_nome_seguro(c) for c in comuns[:50]], "n_cromossomos_comuns": len(comuns),
+                  "n_genes_em_cromossomo_ausente": ausentes, "avisos": avisos}
+    return Veredito("coverages_e_painel", not falhas, falhas, perfil)
+
+
+_SEM_GENES_HOMER = {"M": "mitocondrial: o preparse do HOMER não tem promotores ali",
+                    "MT": "mitocondrial: o preparse do HOMER não tem promotores ali"}
+
+
+@_checagem
+def coverages_contigs_ars_ucd(coverages: Path) -> Veredito:
+    """Portão de contig do HOMER (crítica M7), só no epigenomica_dmc: o genoma e o preparse do
+    HOMER usam '1'…'29' (ARS-UCD, especies/bos_taurus.yaml `contigs: sem_chr`). Coverages com
+    'chr' passariam pelas outras checagens (com um painel em 'chr'), rodariam cinco passos e o
+    motifs pararia no último — o relatório exige todos os envelopes. Mesma regex do
+    vcf_contigs_ars_ucd. M/MT passam com aviso."""
+    v = validar("coverages_bismark", coverages)
+    if not v.ok:
+        return Veredito("coverages_contigs_ars_ucd", False, [f"coverages: {x}" for x in v.falhas])
+    nomes = list(v.perfil.get("cromossomos") or ())
+    chr_ = [c for c in nomes if c.lower().startswith("chr")]
+    fora = [c for c in nomes if not _ARS_UCD.fullmatch(c) and c not in chr_]
+    falhas = []
+    if chr_:
+        falhas.append(f"{len(chr_)} cromossomo(s) com prefixo 'chr' (ex.: {_nome_seguro(chr_[0])}): o genoma e o "
+                      "preparse do HOMER usam '1'…'29'; o passo motifs não extrairia nenhuma sequência")
+    if fora:
+        falhas.append(f"{len(fora)} cromossomo(s) fora da nomenclatura ARS-UCD (1..29, X, Y, M/MT, NKLS02*.1; ex.: "
+                      f"{_nome_seguro(fora[0])})")
+    presentes = [c for c in nomes if c in _SEM_GENES_HOMER]
+    return Veredito("coverages_contigs_ars_ucd", not falhas, falhas, {
+        "cromossomos": [_nome_seguro(c) for c in nomes[:50]], "n_cromossomos": len(nomes),
+        "avisos": [f"{c}: {_SEM_GENES_HOMER[c]}" for c in presentes]})
+
+
 # tipo de checagem → (função, nomes dos campos que apontam para entradas, na ordem dos args)
 CHECAGENS: dict[str, tuple[Callable[..., Veredito], tuple[str, ...]]] = {
     "contagens_e_coldata": (contagens_e_coldata, ("contagens", "coldata")),
     "vcf_tem_info_af": (vcf_tem_info_af, ("vcf",)),
     "vcf_contigs_ars_ucd": (vcf_contigs_ars_ucd, ("vcf",)),
     "vcf_e_bed": (vcf_e_bed, ("vcf", "bed")),
+    # F6
+    "vcf_e_rotulos": (vcf_e_rotulos, ("vcf", "rotulos")),
+    "coverages_e_amostras": (coverages_e_amostras, ("coverages", "amostras")),
+    "coverages_e_painel": (coverages_e_painel, ("coverages", "painel")),
+    "coverages_contigs_ars_ucd": (coverages_contigs_ars_ucd, ("coverages",)),
 }
 # formato que cada campo de uma checagem exige da entrada apontada (validar_contrato confere:
 # uma checagem com os campos trocados reprovaria todo run)
@@ -1757,4 +3230,8 @@ FORMATOS_CHECAGEM: dict[str, dict[str, str]] = {
     "vcf_tem_info_af": {"vcf": "vcf_indexado"},
     "vcf_contigs_ars_ucd": {"vcf": "vcf_indexado"},
     "vcf_e_bed": {"vcf": "vcf_indexado", "bed": "bed_regioes"},
+    "vcf_e_rotulos": {"vcf": "vcf_indexado", "rotulos": "rotulos_amostras"},
+    "coverages_e_amostras": {"coverages": "coverages_bismark", "amostras": "coldata"},
+    "coverages_e_painel": {"coverages": "coverages_bismark", "painel": "painel_genes_json"},
+    "coverages_contigs_ars_ucd": {"coverages": "coverages_bismark"},
 }

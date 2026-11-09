@@ -869,7 +869,8 @@ def test_checagem_nunca_levanta_o_decorador_e_que_segura(tmp_path, monkeypatch):
 def test_tabelas_em_sincronia():
     for f, sufixos in formatos.SUFIXOS.items():
         assert f in formatos.VALIDADORES and formatos.EXTENSOES[f] in sufixos, f
-    assert set(formatos.EXTENSOES) == set(formatos.VALIDADORES)
+    # formato de PASTA (F6) não tem extensão: fica fora de EXTENSOES por definição (ESPEC F6 §2.1)
+    assert set(formatos.EXTENSOES) == set(formatos.VALIDADORES) - set(formatos.DIRETORIOS)
     for f, por_sufixo in formatos.IRMAOS.items():
         assert set(por_sufixo) <= set(formatos.SUFIXOS[f]), f
     assert formatos.REFERENCIAVEIS <= set(formatos.VALIDADORES)
