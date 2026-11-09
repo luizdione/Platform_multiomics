@@ -30,7 +30,7 @@ _DEFAULTS = {
     # Plugin Bioinfo: roteia as MESMAS 815 skills no assistente de código do autor e é a
     # fonte única do glossário de busca PT→EN. Só o host o enxerga (não é montado nos
     # containers): lá fica vazio e a plataforma usa a cópia que o reindex deixou em data/.
-    "BIOINFO_PLUGIN_DIR": "" if os.environ.get("OMICA_IN_DOCKER") else r"C:\github\bioinfo-plugin",
+    "BIOINFO_PLUGIN_DIR": "" if os.environ.get("OMICA_IN_DOCKER") else r"C:\GitHub\Plugin_Skills\plugins\bioinfo",
     # API JSON v1 (orquestração externa, ex.: n8n). Vazio = API DESLIGADA (responde 503):
     # falha fechada. O valor real fica só no .env (gitignored) — nunca no compose
     # `environment:` (apareceria em `docker inspect`) nem no .env.example.

@@ -55,7 +55,7 @@ Resultados    = arquivos em E:\data\omica\results\ (a UI SÓ mostra o que lê da
 
 ## Biblioteca de skills e plugin Bioinfo (v1.0)
 
-A aba **/skills** e o plugin **Bioinfo** (`C:\github\bioinfo-plugin`, o roteador das
+A aba **/skills** e o plugin **Bioinfo** (`C:\GitHub\Plugin_Skills\plugins\bioinfo`, o roteador das
 mesmas 815 skills no assistente de código) deixaram de ser duas ilhas:
 
 ```
