@@ -7,10 +7,12 @@
 # tests/golden/cmd_demo_v1.json). O amostras.tsv é GERADO dos arquivos do repositório
 # (`python tests/test_m0_dados.py --gerar`), nunca digitado.
 #
-# ATENÇÃO (crítica v2, médio 13): o contexto_sha256 dos runs cobre o CONTEÚDO deste arquivo
-# (qualquer campo, inclusive pergunta, avisos e validade; comentários não) e os bytes do
-# amostras.tsv e do painel (CRLF × LF não conta). Mudar um deles derruba com 409 `contexto_mudou` os runs
-# do demo aprovados e ainda não executados (os do n8n caem aqui). Edite com a fila de runs vazia.
+# ATENÇÃO (crítica v2, médio 13; crítica F6, B1): o contexto_sha256 dos runs cobre o CONTEÚDO
+# deste arquivo (qualquer campo, inclusive pergunta, avisos, validade, datasets e pipelines;
+# comentários não) e os bytes do amostras.tsv e do painel (CRLF × LF não conta). Mudar um deles
+# derruba com 409 `contexto_mudou` os runs do demo planejados, aprovados ou com passo ainda não
+# executado (o sha é conferido no aprovar e em cada executar; os do n8n caem aqui). Edite com a
+# fila de runs vazia e registre no CHANGELOG ("sha do contexto do demo mudou").
 id: bos_taurus/demo
 especie: bos_taurus
 assembly: ARS-UCD1.3
@@ -29,8 +31,12 @@ datasets:
   zenodo_cd4: modules/epigenomica/demo_data
   bta14_demo: modules/genomica/demo_data/demo_bta14_inicio.vcf.gz
   run8_1000bg: /data/1000bg_vcf
+  # F6: exemplos das entradas dos pipelines novos (os dois são GERADOS, nunca digitados)
+  rotulos_1000bg: modules/ml/data/rotulos_1000bg_racas.tsv       # tools/derivar_rotulos_1000bg.py
+  amostras_cd4: modules/epigenomica/data/amostras_cd4_demo.tsv   # tests/test_m0_dados.py --gerar
 modulos: [genomica, epigenomica, transcriptomica, ml]
-pipelines: [transcriptomica_de, genomica_painel, genomica_regioes]
+# F6 (crítica B1): pipeline fora desta lista dá 422 pipeline_fora_do_subprojeto; a aula não recebe os 3 novos
+pipelines: [transcriptomica_de, genomica_painel, genomica_regioes, ml_aims_vcf, epigenomica_dmc, epigenomica_mofa]
 parametros: {}                       # vazio DE PROPÓSITO: é o que mantém o cmd byte a byte
 dados_legados:
   - /data/omica/results/genomica/demo

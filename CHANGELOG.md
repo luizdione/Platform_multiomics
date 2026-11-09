@@ -4,6 +4,102 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/), versão em `VERS
 
 ## [Unreleased] · Integração com o n8n (fases F0–F2 do plano de 2026-10-18)
 
+### F6: Epigenômica e ML como pipelines do n8n, entrada de PASTA e contexto D-10 (T-0026 — 2026-11-01)
+Separável do n8n F0–F5 e da v2 abaixo, mas depende da v2 (contexto, `especies`,
+`requer_refs`). Nenhum workflow selado novo: os 5 selos, os scripts selados e o golden
+(`tests/golden/cmd_demo_v1.json`) continuam byte a byte.
+
+#### ⚠️ Mudanças de comportamento
+- **sha do contexto do demo mudou: pipelines F6.** `projetos/bos_taurus/demo/subprojeto.yaml`
+  passa a listar os 6 pipelines (`ml_aims_vcf`, `epigenomica_dmc` e `epigenomica_mofa`, além
+  dos 3 de antes) e ganha os datasets `rotulos_1000bg` e `amostras_cd4`. Um run do demo
+  planejado, aprovado ou com passo ainda não executado com o sha antigo cai em **409**
+  `contexto_mudou`. Run planejado: refaça o plano. Run aprovado ou com passo pendente: aborte
+  e crie outro (o plano aprovado é congelado: 409 `plano_congelado`). Plano de antes da v2
+  (sem a chave `contexto`) não é conferido. A aula continua só com `transcriptomica_de`.
+- **O prompt do redator mudou e vale para todos os módulos** (`n8n/prompts/relatorio_sistema.md`:
+  direção da metilação, classes do ML pelo nome, linha `Contexto:` sem generalizar para outra
+  espécie, "ALERTAS ou ALERTAS DO SUBPROJETO"); novo `prompt_sha256` em cada tentativa. O E2E-0
+  (regressão da transcriptômica e da genômica) inclui o relatório.
+- **Os 6 workflows do n8n mandam `{pipeline, especie, subprojeto}`** (D-10). Uma página do
+  formulário ("Onde este run vai morar") lista os subprojetos de
+  `GET /api/v1/subprojetos?pipeline=<id>&privados=false`, só os PÚBLICOS (falha fechada), e o
+  n8n confere o par escolhido antes do POST. Os 3 JSONs já publicados mudaram (as URLs
+  `/form/<webhookId>` não): reimportar e republicar os 6.
+- **Parâmetro fixado no pipeline e também sobrescrito pelo contexto → 422**
+  `parametro_fixo_no_pipeline` (X7). O `regiao` do `ml_dataset` é do DADO (`escopo:
+  subprojeto`): fora de `bos_taurus/demo`, o subprojeto declara
+  `parametros: {ml.ml_dataset.regiao: <contig:ini-fim>}` (sem ela, 422 `parametro_recusado`).
+- **Escolhas iguais** onde o pipeline declara `diferente_de` → **422** `escolhas_iguais`
+  (ex.: Angus × Angus).
+- **Coverages com `chr*` (W15) reprovam cedo no `epigenomica_dmc`** (checagem
+  `coverages_contigs_ars_ucd`, "prefixo 'chr'"): o HOMER só conhece os contigs ARS-UCD. Esses
+  dados rodam só no `epigenomica_mofa` até existir o mapeamento `chr` → sem `chr`.
+- **`/resultados` não serve cópia bruta**: `.cov`/`.cov.gz` e arquivo dentro de subpasta de
+  passo respondem **303** (M13).
+- **Resumo com NaN/Infinity vira `null`** no envelope (JSON estrito para todo consumidor).
+- `docker-compose.yml`: `PYTHONDONTWRITEBYTECODE=1` na web e nos 5 workers (X6: sem
+  `__pycache__` gravado no repositório montado em `/app`).
+
+#### Adicionado
+- **Entrada e porta de PASTA nos runs** (`omica/contrato/diretorio.py`, árvore
+  `omica.diretorio/1`). Só por caminho e por cópia (`modos: [copia]`; upload → 422
+  `entrada_exige_caminho`); membros pela regra do formato, com o sha de cada membro e o da
+  árvore no plano. Symlink, junção e hardlink são recusados (no container, `dir_fd` +
+  `O_NOFOLLOW` barram também FIFO e troca de componente-pai; no host Windows, inode e reparse
+  point). Tetos por membro e por pasta → 413 `entrada_grande_demais`; pasta mudada entre o
+  registro e o uso → 409 `entrada_alterada`.
+- **Formatos e checagens novos** (`omica/contrato/formatos.py`): as pastas `coverages_bismark`
+  e `coverages_por_condicao`, além de `rotulos_amostras`, `matriz_marcadores`,
+  `dmc_methylkit`, `cpgs_methylkit`, views e fatores do MOFA e outros; as checagens
+  `vcf_e_rotulos`, `coverages_e_amostras`, `coverages_e_painel` e `coverages_contigs_ars_ucd`.
+- **Contrato** (`omica/pipelines.py`): `Escolha.diferente_de`, `Filtro.abs_maior_que`,
+  invariantes `contagem_linhas`/`soma_coluna` sobre a tabela de uma porta, `desempate` (a
+  recontagem do DMC fecha em 275: a borda |diff| = 15 é decidida pelo `dmc.tsv`) e
+  `relatorio.alertas` (alerta fixo ou condicionado a um fato).
+- **Avisos do subprojeto chegam ao relatório**: no plano (`contexto.avisos`), na mensagem ao
+  redator ("ALERTAS DO SUBPROJETO"), no HTML e no "Resumo do plano" do n8n.
+- **API**: `GET /api/v1/subprojetos?pipeline=<id>&privados=<bool>`, com a mesma regra do
+  `POST /runs` (404 `pipeline_inexistente`).
+- **Pipeline `ml_aims_vcf`** (contraste → dataset → diagnóstico → classificar → robustez).
+  Scripts novos `ml_contraste.py` e `ml_diagnostico.py` (alertas de empate em importância
+  zero e de marcador que separa as classes sozinho). Tabela de exemplo
+  `modules/ml/data/rotulos_1000bg_racas.tsv` (820 amostras, 16 raças com n ≥ 10), GERADA por
+  `tools/derivar_rotulos_1000bg.py`, com proveniência.
+- **Pipelines `epigenomica_dmc`** (montar → janelas → DMC → interseção → TSS → motifs) e
+  **`epigenomica_mofa`** (montar → views → MOFA). Scripts novos `montar_coverages.py` (pasta
+  por condição a partir do coldata), `painel_janelas.py` e `mofa_treinar_api.py` (condições
+  do coldata, não do `grupos.tsv`, que rotula HF tudo o que não é Nelore). O HOMER recebe o
+  genoma e o preparse do contexto (`requer_refs: [ref_fasta, ref_homer_preparsed]`; no demo,
+  os mesmos caminhos de antes). Exemplo `modules/epigenomica/data/amostras_cd4_demo.tsv`,
+  gerado por `tests/test_m0_dados.py --gerar`.
+- **n8n**: 3 workflows novos (`omicaMLAimsVcf01`, `omicaEpigDMC0001`, `omicaEpigMOFA001`) e os
+  3 atuais regenerados; ordem de importação e URLs no `n8n/README.md` (bloco F6).
+- `tests/golden/gerar_golden_v1.py --conferir` compara só as chaves gravadas na v1 (as specs
+  novas aparecem como "fora do I2").
+
+#### Corrigido (verificação da F6, 2026-11-01)
+- `GET /api/v1/subprojetos?privados=false` (a chamada do n8n, gravada no registro de execução)
+  devolvia em `erros` o slug e o título de um subprojeto PRIVADO de `<dados>` que não carrega.
+  Agora só os erros `repo:*` saem (falha fechada); com `privados=true` o detalhe continua.
+- MOFA: as invariantes de contagem (n_y0/n_y1) não pegavam rótulo trocado num desenho
+  balanceado. O `mofa_resumo` ganha `n_rotulo_igual_prefixo` (recalculado do NOME da coluna que
+  o `montar` gravou) e o `epigenomica_mofa` ganha a invariante 7 (= `montar.n_amostras`).
+- Bomba gzip partida em membros pequenos (< 1 MiB cada) passava: a razão de compressão agora é
+  conferida também SOMANDO os `.cov.gz` da pasta (validador e `montar_coverages`, em sincronia).
+- Invariantes que só ecoam o próprio script ficam marcadas como eco (não contam como canário);
+  o alerta de empates do ML diz que é o XGBoost; o "Resumo do plano" do n8n mostra só os avisos
+  do subprojeto que valem para o módulo do run (a mesma regra do relatório).
+
+#### Deploy (nesta ordem; adendo F6 §A11)
+1. Fila do demo vazia: nenhum run do demo planejado, aprovado ou executando.
+2. Recriar o compose (X6) e reiniciar web e workers com o código novo, sem run ativo.
+3. Backup dos workflows no n8n; importar e publicar os 6; refazer o E2E-0, também na aula.
+4. `E:\data\omica\entradas` existe (criar se faltar). É a caixa GLOBAL das pastas: dado de
+   subprojeto privado não fica nela fora do uso.
+5. RAM abaixo de 80% antes do E2E-EPI-A (HOMER, `mem_gb` 6).
+
+
 ### v2 multiespécie / multiprojeto (M0, M1, M3, M4 e M5 — 2026-10-29)
 Separável do resto do [Unreleased]: se a 1.1.0 sair só com o n8n, este bloco vai para a 2.0.0.
 
