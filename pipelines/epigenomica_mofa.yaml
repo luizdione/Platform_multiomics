@@ -1,0 +1,88 @@
+# Pipeline orquestrável (n8n, F6): MOFA da metilação do painel, promotor × corpo gênico.
+#
+# Mesmas entradas do epigenomica_dmc (pasta de coverages só por cópia, coldata, painel JSON),
+# sem o HOMER e sem o portão de contig: coverages com 'chr' (o W15, GSE161113) rodam AQUI,
+# desde que o painel use a mesma nomenclatura (coverages_e_painel).
+#
+# O MOFA não é supervisionado: não há escolha do autor. Os rótulos só medem a separação das
+# duas condições em cada fator, e vêm do COLDATA (mofa_treinar_api.py), nunca do grupos.tsv do
+# mofa_preparar selado — que rotula "HF" tudo que não tem "Nelore" no nome (decisão 9, M8).
+id: epigenomica_mofa
+modulo: epigenomica
+titulo: "MOFA da metilação do painel: promotor × corpo gênico"
+descricao: >-
+  Pasta de coverages Bismark, tabela de amostras e painel → metilação média por gene em duas
+  views (promotor ±2 kb e corpo, disjuntas) → MOFA (3 fatores), variância explicada por view
+  e separação das duas condições em cada fator.
+
+entradas:
+  coverages:
+    formato: coverages_bismark
+    rotulo: >-
+      Pasta de coverages Bismark (.cov ou .cov.gz) — caminho no servidor
+      (modules/epigenomica/demo_data ou /data/omica/entradas/<pasta>)
+    exemplo: modules/epigenomica/demo_data
+  amostras:
+    formato: coldata
+    adaptavel: true
+    rotulo: >-
+      Tabela de amostras (.tsv: amostra = nome do arquivo sem .bismark.cov.gz/.cov.gz/.cov;
+      condicao; exatamente 2 condições, ≥2 amostras cada)
+    exemplo: modules/epigenomica/data/amostras_cd4_demo.tsv
+  painel:
+    formato: painel_genes_json
+    rotulo: "Painel de genes (.json: genes → cromossomo, início, fim, fita)"
+    exemplo: modules/epigenomica/data/paineis/painel_108.json
+
+checagens_entrada:
+  - {tipo: coverages_e_amostras, coverages: coverages, amostras: amostras}
+  - {tipo: coverages_e_painel, coverages: coverages, painel: painel}
+
+passos:
+  - id: montar
+    script: montar_coverages
+    liga: {coverages: entrada.coverages, amostras: entrada.amostras}
+  - id: views
+    script: mofa_preparar
+    liga: {coverages: montar.coverages, painel: entrada.painel}
+    params: {promotor: "2000", min_amostras: "4"}
+  - id: mofa
+    script: mofa_treinar_api
+    liga: {promotor: views.view_promotor, corpo: views.view_corpo, amostras: entrada.amostras}
+    params: {fatores: "3"}
+
+relatorio:
+  figuras: [mofa.mofa_png]
+  resumos: [montar.montar_resumo, views.views_resumo, mofa.mofa_resumo]
+  tabelas:
+    - {passo: mofa, porta: variancia, chave: fator, colunas: [promotor, corpo], top: {n: 10}}
+  # Cada invariante e a falha real que ela pega (tests/test_relatorio_epigenomica.py tem um
+  # canário por invariante que não é eco). Eco = o número e a tabela saem do MESMO script e da
+  # MESMA variável: nunca reprova; uma tabela mexida depois do envelope é o sha256 (R3) que pega.
+  invariantes:
+    # o MOFA treinou com todas as amostras das views
+    - {tipo: igual, a: mofa.mofa_resumo.n_amostras, b: views.views_resumo.n_amostras}
+    # e com todos os genes de cada view
+    - {tipo: igual, a: mofa.mofa_resumo.genes_por_view.promotor, b: views.views_resumo.genes_por_view.promotor}
+    - {tipo: igual, a: mofa.mofa_resumo.genes_por_view.corpo, b: views.views_resumo.genes_por_view.corpo}
+    # as views leram todos os coverages que o montar gravou
+    - {tipo: igual, a: views.views_resumo.n_amostras, b: montar.montar_resumo.n_amostras}
+    # o rótulo de cada coluna é o do coldata (crítica M8): um mapeamento coluna → condição que
+    # muda as contagens (o grupos.tsv do selado, 6 × HF no "CD4 renomeado") muda n_y0/n_y1 do
+    # MOFA, que o montar contou direto da tabela de amostras
+    - {tipo: igual, a: mofa.mofa_resumo.n_y0, b: montar.montar_resumo.n_y0}
+    - {tipo: igual, a: mofa.mofa_resumo.n_y1, b: montar.montar_resumo.n_y1}
+    # …e o rótulo trocado que PRESERVA as contagens (o grupos.tsv com Lote1 × Lote2 misturando HF
+    # e Nelore, ou a ordem invertida, aprovam a 5 e a 6): toda coluna tem a condição atribuída
+    # igual ao prefixo do NOME antes do primeiro '__', que o montar gravou
+    - {tipo: igual, a: mofa.mofa_resumo.n_rotulo_igual_prefixo, b: montar.montar_resumo.n_amostras}
+    # eco de consistência: não conta como canário (n_fatores e as linhas da variância saem do mesmo args.fatores)
+    - {tipo: contagem_linhas, porta: mofa.variancia, total: mofa.mofa_resumo.n_fatores}
+    # eco de consistência: não conta como canário (n_amostras e as linhas dos fatores saem da mesma lista de rótulos)
+    - {tipo: contagem_linhas, porta: mofa.fatores, total: mofa.mofa_resumo.n_amostras}
+    # eco de consistência: não conta como canário (o mofa_preparar conta e escreve a mesma lista linhas_out)
+    - {tipo: contagem_linhas, porta: views.view_promotor, total: views.views_resumo.genes_por_view.promotor}
+    # eco de consistência: não conta como canário (o mofa_preparar conta e escreve a mesma lista linhas_out)
+    - {tipo: contagem_linhas, porta: views.view_corpo, total: views.views_resumo.genes_por_view.corpo}
+
+selo_pipeline: {testado_em: "", hash: ""}

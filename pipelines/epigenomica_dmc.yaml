@@ -1,0 +1,140 @@
+# Pipeline orquestrável (n8n, F6): metilação diferencial a partir de uma PASTA de coverages.
+#
+# Entradas: a pasta de coverages Bismark (só por CÓPIA, caminho no servidor: o upload de pasta
+# dá 422 entrada_exige_caminho), a tabela de amostras (coldata: amostra = nome do arquivo sem
+# .bismark.cov.gz/.cov.gz/.bismark.cov/.cov; exatamente 2 condições) e o painel de genes JSON.
+#
+# Os scripts selados escolhem o grupo por SUBSTRING do nome do arquivo (metilacao_dmc.R:32-33,
+# perfil_tss.py:76-77). O passo `montar` grava cada coverage como <condicao>__<amostra>.bismark
+# .cov.gz, e a disjunção por substring é conferida três vezes: na checagem (antes do plano), no
+# montar (durante o job) e no validador da porta montar.coverages.
+#
+# Ordem LINEAR, com o HOMER por ÚLTIMO: o executar de um passo exige o portão aprovado de todos
+# os anteriores, e o relatório exige o envelope de todos. Coverages com 'chr' (o W15, GSE161113)
+# são barrados ANTES do plano pela checagem coverages_contigs_ars_ucd: o genoma e o preparse do
+# HOMER usam '1'…'29', e o motifs não extrairia nenhuma sequência (crítica M7). Esses dados rodam
+# só o epigenomica_mofa, até existir um mapeamento chr → sem_chr (R14).
+id: epigenomica_dmc
+modulo: epigenomica
+titulo: "Metilação diferencial: coverages Bismark → DMCs, painel de genes, TSS e motifs"
+descricao: >-
+  Pasta de coverages Bismark, tabela de amostras (duas condições) e painel de genes →
+  DMCs (methylKit, BH) entre as duas condições escolhidas → interseção com as janelas ±15 kb
+  do painel → metaperfil ±2 kb do TSS → motifs HOMER (exploratório).
+
+entradas:
+  coverages:
+    formato: coverages_bismark
+    rotulo: >-
+      Pasta de coverages Bismark (.cov ou .cov.gz) — caminho no servidor
+      (modules/epigenomica/demo_data ou /data/omica/entradas/<pasta>)
+    exemplo: modules/epigenomica/demo_data
+  amostras:
+    formato: coldata
+    adaptavel: true
+    rotulo: >-
+      Tabela de amostras (.tsv: amostra = nome do arquivo sem .bismark.cov.gz/.cov.gz/.cov;
+      condicao; exatamente 2 condições, ≥2 amostras cada)
+    exemplo: modules/epigenomica/data/amostras_cd4_demo.tsv
+  painel:
+    formato: painel_genes_json
+    rotulo: "Painel de genes (.json: genes → cromossomo, início, fim, fita)"
+    exemplo: modules/epigenomica/data/paineis/painel_108.json
+
+checagens_entrada:
+  # amostra sem arquivo, stem repetido (x.cov × x.cov.gz ou só na caixa), nome final inválido e
+  # condição que casa por substring com arquivo de outra (a 'cov', 'Gir' × 'Girolando')
+  - {tipo: coverages_e_amostras, coverages: coverages, amostras: amostras}
+  # nenhum cromossomo em comum (coverages 'chr1' × painel '1'): interseção e TSS dariam 0 genes
+  - {tipo: coverages_e_painel, coverages: coverages, painel: painel}
+  # portão de contig do HOMER (só neste pipeline): 'chr*' ou fora do ARS-UCD reprova
+  - {tipo: coverages_contigs_ars_ucd, coverages: coverages}
+
+# Decisões científicas do autor, só entre valores REAIS do coldata (dropdown). As duas têm de
+# ser diferentes: grupo_a == grupo_b dava 0 DMC com código 0 (422 escolhas_iguais).
+escolhas_autor:
+  grupo_a:
+    rotulo: "Grupo A (hiper/hipo medidos em A em relação a B)"
+    valores_de: amostras.condicao
+  grupo_b:
+    rotulo: "Grupo B (referência; diferente de A)"
+    valores_de: amostras.condicao
+    diferente_de: grupo_a
+
+passos:
+  - id: montar
+    script: montar_coverages
+    liga: {coverages: entrada.coverages, amostras: entrada.amostras}
+  - id: janelas
+    script: painel_janelas
+    liga: {painel: entrada.painel}
+    params: {pad: "15000"}
+  - id: dmc
+    script: dmc
+    liga: {coverages: montar.coverages, grupo_a: escolha.grupo_a, grupo_b: escolha.grupo_b}
+    params: {min_cov: "5", diff: "15", qvalue: "0.05"}
+  - id: intersecao
+    script: intersecao
+    liga: {dmc: dmc.dmc, painel: janelas.bed}
+  - id: tss
+    script: tss
+    liga: {coverages: montar.coverages, painel: entrada.painel, grupo_a: escolha.grupo_a, grupo_b: escolha.grupo_b}
+    params: {janela: "2000", bin: "100"}
+  - id: motifs
+    script: motifs
+    liga: {cpgs: dmc.todas_cpgs}
+    params: {q_max: "0.25", top_n: "200", flanco: "100"}
+
+relatorio:
+  figuras: [tss.tss_png]
+  resumos: [montar.montar_resumo, janelas.janelas_resumo, dmc.dmc_resumo, intersecao.intersecao_resumo,
+            tss.tss_resumo, motifs.motifs_resumo]
+  # motifs_top.tsv fica de fora: MOTIF não é chave única (os nomes do HOMER se repetem)
+  tabelas:
+    - {passo: intersecao, porta: intersecao, chave: GENE, colunas: [N_DMC, HIPER, HIPO], top: {n: 10}}
+  alertas:
+    - texto: >-
+        A busca de motifs do HOMER é exploratória: usa um corte de q mais frouxo que o das DMCs,
+        junta CpGs mais e menos metiladas, e a lista de motifs não traz só os significativos.
+  # Cada invariante e a falha real que ela pega (tests/test_relatorio_epigenomica.py tem um
+  # canário por invariante que não é eco). Eco = o número e a tabela (ou os dois números) saem do
+  # MESMO script e da MESMA variável: nunca reprova; uma tabela mexida depois do envelope é o
+  # sha256 (R3) que pega, não a contagem.
+  invariantes:
+    # eco de consistência: não conta como canário (hiper e hipo saem do mesmo R que conta n_dmc)
+    - {tipo: soma, partes: [dmc.dmc_resumo.n_hiper_no_grupo_a, dmc.dmc_resumo.n_hipo_no_grupo_a], total: dmc.dmc_resumo.n_dmc}
+    # a interseção leu o dmc.tsv deste run inteiro
+    - {tipo: igual, a: intersecao.intersecao_resumo.n_dmc_total, b: dmc.dmc_resumo.n_dmc}
+    # o R achou por substring exatamente as amostras que o montar gravou (nenhuma a mais/a menos)
+    - {tipo: soma, partes: [dmc.dmc_resumo.grupo_a.n, dmc.dmc_resumo.grupo_b.n], total: montar.montar_resumo.n_amostras}
+    # o TSS (Python, glob) e o DMC (R, list.files) viram os mesmos grupos
+    - {tipo: igual, a: tss.tss_resumo.grupo_a.n_amostras, b: dmc.dmc_resumo.grupo_a.n}
+    - {tipo: igual, a: tss.tss_resumo.grupo_b.n_amostras, b: dmc.dmc_resumo.grupo_b.n}
+    # a interseção leu o BED inteiro que o passo janelas gravou
+    - {tipo: igual, a: intersecao.intersecao_resumo.n_genes_painel, b: janelas.janelas_resumo.n_janelas}
+    # eco de consistência: não conta como canário (os dois contam o mesmo painel JSON)
+    - {tipo: igual, a: tss.tss_resumo.n_tss, b: janelas.janelas_resumo.n_genes}
+    # eco de consistência: não conta como canário (os dois contam o mesmo painel JSON)
+    - {tipo: igual, a: tss.tss_resumo.n_tss_fita_negativa, b: janelas.janelas_resumo.n_fita_negativa}
+    # n_dmc recontado na tabela INTEIRA de todas as CpGs com os cortes do resumo. O methylKit
+    # compara |diff| com '>' (abs_maior_que); a linha de borda (|diff| a menos de 1e-9 de 15:
+    # 4:68856356 no demo) é decidida pela presença no dmc.tsv, que é o que o methylKit decidiu
+    # sobre o double (desempate, adendo §A4 X3′). Demo: 275; com '>=' e sem desempate, 276.
+    - tipo: recontagem
+      porta: dmc.todas_cpgs
+      desempate: dmc.dmc
+      filtros:
+        - {coluna: qvalue, menor_que: dmc.dmc_resumo.criterios.qvalue}
+        - {coluna: meth.diff, abs_maior_que: dmc.dmc_resumo.criterios.diff_pct}
+      total: dmc.dmc_resumo.n_dmc
+    # o calculateDiffMeth devolveu uma linha por CpG que o unite juntou: n_cpg_testados é o
+    # nrow(unido) e a tabela é o getData(dif), objetos diferentes do R (metilacao_dmc.R:42-69)
+    - {tipo: contagem_linhas, porta: dmc.todas_cpgs, total: dmc.dmc_resumo.n_cpg_testados}
+    # eco de consistência: não conta como canário (n_dmc é o nrow do mesmo `tab` que o R grava no dmc.tsv)
+    - {tipo: contagem_linhas, porta: dmc.dmc, total: dmc.dmc_resumo.n_dmc}
+    # eco de consistência: não conta como canário (a soma e a coluna N_DMC saem do mesmo dicionário `contagem`)
+    - {tipo: soma_coluna, porta: intersecao.intersecao, coluna: N_DMC, total: intersecao.intersecao_resumo.n_atribuicoes_gene}
+    # eco de consistência: não conta como canário (n_genes_com_dmc é o len do mesmo `contagem` que vira a tabela)
+    - {tipo: contagem_linhas, porta: intersecao.intersecao, total: intersecao.intersecao_resumo.n_genes_com_dmc}
+
+selo_pipeline: {testado_em: "", hash: ""}

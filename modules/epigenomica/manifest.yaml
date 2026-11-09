@@ -155,6 +155,189 @@ scripts:
     mem_gb: 3
     cpus: 1
     tempo_estimado: "~2 min"
+# Entradas ORQUESTRÁVEIS (pipelines/epigenomica_dmc.yaml e epigenomica_mofa.yaml, n8n; F6): os
+# MESMOS scripts selados de `scripts:` (nenhum editado) mais três novos, sem selo
+# (montar_coverages, painel_janelas, mofa_treinar_api), com entrada e saída por parâmetro e
+# cada porta tipada (omica/contrato/formatos.py). Esta seção não entra no hash dos selos
+# (registry.hash_dos_passos só lê `scripts:`) e não tem linha de selo: o selos.regravar grava
+# pela ORDEM das linhas de selo do arquivo.
+#
+# O grupo continua saindo do NOME do arquivo (os selados escolhem por substring): o passo
+# `montar` copia cada coverage da tabela de amostras para <condicao>__<amostra>.bismark.cov.gz,
+# e é essa pasta (porta montar.coverages, `tipo: dir`) que o DMC, o TSS e as views leem.
+scripts_api:
+  - key: montar_coverages
+    titulo: "Coverages por condição (nomes <condição>__<amostra>)"
+    descricao: Copia os coverages da tabela de amostras com a condição no nome e recusa condição que os scripts leriam por substring em arquivo de outra.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/montar_coverages.py
+      --coverages {coverages} --amostras {amostras} --saida {saida}
+    params:
+      - {name: coverages, rotulo: "Pasta de coverages Bismark", tipo: dir}
+      - {name: amostras, rotulo: "Tabela de amostras (amostra, condicao)", tipo: caminho}
+    consome: {coverages: coverages_bismark, amostras: coldata}
+    produz:
+      coverages: {arquivo: coverages, formato: coverages_por_condicao}
+      montar_resumo: {arquivo: montar_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~5 s (demo)"
+  - key: painel_janelas
+    titulo: "Painel → janelas ±pad (BED)"
+    descricao: Janelas de cada gene do painel, na ordem (cromossomo como texto, início).
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/painel_janelas.py
+      --painel {painel} --pad {pad} --saida {saida}
+    params:
+      - {name: painel, rotulo: "Painel de genes (.json)", tipo: caminho}
+      - {name: pad, rotulo: "Flanco em pb", default: "15000", tipo: inteiro}
+    consome: {painel: painel_genes_json}
+    produz:
+      bed: {arquivo: janelas.bed, formato: painel_bed}
+      janelas_resumo: {arquivo: janelas_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~2 s"
+  - key: dmc
+    titulo: "DMCs (methylKit, |diff| e q, BH)"
+    descricao: CpGs diferencialmente metiladas entre as duas condições escolhidas.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      Rscript modules/epigenomica/scripts/metilacao_dmc.R
+      --dir {coverages} --grupo-a {grupo_a} --grupo-b {grupo_b}
+      --min-cov {min_cov} --diff {diff} --qvalue {qvalue}
+      --saida {saida}
+    params:
+      - {name: coverages, rotulo: "Coverages por condição", tipo: dir}
+      - {name: grupo_a, rotulo: "Grupo A (condição)", tipo: texto}
+      - {name: grupo_b, rotulo: "Grupo B (condição)", tipo: texto}
+      - {name: min_cov, rotulo: "Cobertura mínima por CpG", default: "5", tipo: inteiro}
+      - {name: diff, rotulo: "|diferença| mínima (%)", default: "15", tipo: decimal}
+      - {name: qvalue, rotulo: "q máximo", default: "0.05", tipo: decimal}
+    consome: {coverages: coverages_por_condicao}
+    produz:
+      dmc: {arquivo: dmc.tsv, formato: dmc_methylkit}
+      todas_cpgs: {arquivo: todas_cpgs.tsv, formato: cpgs_methylkit}
+      dmc_resumo: {arquivo: dmc_resumo.json, formato: resumo_json}
+    # mem_gb 3 vale para o demo e o W15 (medidos). No teto agregado da pasta (60 M linhas, 2 GiB
+    # descomprimidos; adendo §A6.2) o pico do methylKit ainda NÃO foi medido: medir antes do
+    # primeiro dado real acima de ~50 MB comprimidos e ajustar (o campo fica fora do hash; R16)
+    mem_gb: 3
+    cpus: 1
+    tempo_estimado: "~1 min"
+  - key: intersecao
+    titulo: "Interseção DMC × janelas do painel"
+    descricao: DMCs (hiper/hipo) por janela de gene; cada DMC conta uma vez no total.
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/intersecao_dmc_painel.py
+      --dmc {dmc} --painel {painel} --saida {saida}
+    params:
+      - {name: dmc, rotulo: "Tabela de DMCs", tipo: caminho}
+      - {name: painel, rotulo: "Janelas do painel (BED)", tipo: caminho}
+    consome: {dmc: dmc_methylkit, painel: painel_bed}
+    produz:
+      intersecao: {arquivo: intersecao.tsv, formato: tabela_intersecao_painel}
+      intersecao_resumo: {arquivo: intersecao_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~10 s"
+  - key: tss
+    titulo: "Metaperfil de metilação ao redor do TSS"
+    descricao: Metilação média por bin ±janela do TSS de cada gene do painel, por condição.
+    runtime: "image:omica-methyl"
+    # o TSS sai do painel JSON (perfil_tss.py:60-66): nenhuma referência do contexto
+    cmd: >-
+      python3 modules/epigenomica/scripts/perfil_tss.py
+      --dir {coverages} --painel {painel} --grupo-a {grupo_a} --grupo-b {grupo_b}
+      --janela {janela} --bin {bin} --saida {saida}
+    params:
+      - {name: coverages, rotulo: "Coverages por condição", tipo: dir}
+      - {name: painel, rotulo: "Painel de genes (.json)", tipo: caminho}
+      - {name: grupo_a, rotulo: "Grupo A (condição)", tipo: texto}
+      - {name: grupo_b, rotulo: "Grupo B (condição)", tipo: texto}
+      - {name: janela, rotulo: "Janela ± em pb", default: "2000", tipo: inteiro}
+      - {name: bin, rotulo: "Bin em pb", default: "100", tipo: inteiro}
+    consome: {coverages: coverages_por_condicao, painel: painel_genes_json}
+    produz:
+      tss_png: {arquivo: tss_perfil.png, formato: figura_png}
+      tss_resumo: {arquivo: tss_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~30 s"
+  - key: motifs
+    titulo: "Motifs de TF (HOMER, known) — exploratório"
+    descricao: Top CpGs por |meth.diff| com q relaxado, ±flanco, contra o genoma da espécie (contexto).
+    runtime: "image:omica-methyl"
+    # v2 (adendo §A9.1, crítica M2): o genoma e o preparse do HOMER vêm do contexto
+    # (especies/<esp>.yaml, assembly do subprojeto), como o B5 fez no painel_bed/snpeff. No
+    # bos_taurus são os mesmos literais dos defaults de motifs_homer.py:31-32 (amarrados por
+    # tests/test_m0_dados.py): o argv do demo só ganha as duas flags, com os mesmos caminhos
+    requer_refs: [ref_fasta, ref_homer_preparsed]
+    cmd: >-
+      python3 modules/epigenomica/scripts/motifs_homer.py
+      --cpgs {cpgs} --q-max {q_max} --top-n {top_n} --flanco {flanco}
+      --genoma {ref_fasta} --preparsed {ref_homer_preparsed}
+      --saida {saida}
+    params:
+      - {name: cpgs, rotulo: "Tabela de todas as CpGs testadas", tipo: caminho}
+      - {name: q_max, rotulo: "q máximo (relaxado)", default: "0.25", tipo: decimal}
+      - {name: top_n, rotulo: "Top CpGs por |diff|", default: "200", tipo: inteiro}
+      - {name: flanco, rotulo: "Flanco em pb", default: "100", tipo: inteiro}
+    consome: {cpgs: cpgs_methylkit}
+    produz:
+      motifs_top: {arquivo: motifs_top.tsv, formato: tabela_motifs_homer}
+      motifs_resumo: {arquivo: motifs_resumo.json, formato: resumo_json}
+    mem_gb: 6
+    cpus: 2
+    tempo_estimado: "~25 min (medido 2026-10-05; -p 2; preparse size 200 já em refs)"
+  - key: mofa_preparar
+    titulo: "MOFA — views promotor × corpo"
+    descricao: Metilação média por gene do painel em duas views pareadas por amostra.
+    runtime: "image:omica-methyl"
+    # o grupos.tsv que o selado grava ao lado das views rotula "HF" tudo que não tem "Nelore" no
+    # nome (mofa_preparar.py:119): não é porta, e o mofa_treinar_api não o lê
+    cmd: >-
+      python3 modules/epigenomica/scripts/mofa_preparar.py
+      --dir {coverages} --painel {painel} --promotor {promotor} --min-amostras {min_amostras}
+      --saida {saida}
+    params:
+      - {name: coverages, rotulo: "Coverages por condição", tipo: dir}
+      - {name: painel, rotulo: "Painel de genes (.json)", tipo: caminho}
+      - {name: promotor, rotulo: "Promotor ± em pb", default: "2000", tipo: inteiro}
+      - {name: min_amostras, rotulo: "Mínimo de amostras com dado por gene", default: "4", tipo: inteiro}
+    consome: {coverages: coverages_por_condicao, painel: painel_genes_json}
+    produz:
+      view_promotor: {arquivo: view_promotor.tsv, formato: view_mofa}
+      view_corpo: {arquivo: view_corpo.tsv, formato: view_mofa}
+      views_resumo: {arquivo: views_resumo.json, formato: resumo_json}
+    mem_gb: 1
+    cpus: 1
+    tempo_estimado: "~20 s"
+  - key: mofa_treinar_api
+    titulo: "MOFA — fatores, variância explicada e separação das condições"
+    descricao: mofapy2 com os rótulos da tabela de amostras (qualquer par de condições).
+    runtime: "image:omica-methyl"
+    cmd: >-
+      python3 modules/epigenomica/scripts/mofa_treinar_api.py
+      --promotor {promotor} --corpo {corpo} --amostras {amostras} --fatores {fatores}
+      --saida {saida}
+    params:
+      - {name: promotor, rotulo: "View promotor", tipo: caminho}
+      - {name: corpo, rotulo: "View corpo", tipo: caminho}
+      - {name: amostras, rotulo: "Tabela de amostras (amostra, condicao)", tipo: caminho}
+      - {name: fatores, rotulo: "Número de fatores (≥2)", default: "3", tipo: inteiro}
+    consome: {promotor: view_mofa, corpo: view_mofa, amostras: coldata}
+    produz:
+      variancia: {arquivo: variancia_explicada.tsv, formato: tabela_variancia_mofa}
+      fatores: {arquivo: fatores_por_amostra.tsv, formato: fatores_mofa}
+      mofa_png: {arquivo: mofa_fatores.png, formato: figura_png}
+      mofa_resumo: {arquivo: mofa_resumo.json, formato: resumo_json}
+    mem_gb: 3
+    cpus: 1
+    tempo_estimado: "~2 min"
 workflows:
   - id: wf_mofa_demo
     titulo: "MOFA do painel 108 (promotor × corpo)"

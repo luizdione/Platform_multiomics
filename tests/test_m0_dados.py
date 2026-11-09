@@ -10,7 +10,9 @@ Cada conferência é uma função que devolve a LISTA de problemas (vazia = ok):
     conferência morde (sem ela, o canário reprova).
 
 Os dois amostras.tsv são GERADOS daqui, a partir do coldata e dos coverages de demo do
-repositório — nunca digitados (ESPEC §4 D1). Para regerar:
+repositório — nunca digitados (ESPEC §4 D1). Também daqui sai a tabela de amostras do exemplo
+da epigenômica, modules/epigenomica/data/amostras_cd4_demo.tsv (F6, adendo v2 §A9.3: amostra =
+nome do coverage sem .bismark.cov.gz; condicao = o grupo do nome). Para regerar:
 
     PYTHONUTF8=1 python tests/test_m0_dados.py --gerar
 """
@@ -43,6 +45,7 @@ PROJETOS_REPO = REPO_ROOT / "projetos"
 COLDATA = REPO_ROOT / "modules" / "transcriptomica" / "demo_data" / "coldata_granulosa.tsv"
 COUNTS = REPO_ROOT / "modules" / "transcriptomica" / "demo_data" / "counts_granulosa.tsv"
 EPI_DEMO = REPO_ROOT / "modules" / "epigenomica" / "demo_data"
+AMOSTRAS_CD4 = REPO_ROOT / "modules" / "epigenomica" / "data" / "amostras_cd4_demo.tsv"
 GOLDEN = Path(__file__).resolve().parent / "golden" / "cmd_demo_v1.json"
 
 ORDEM_ESPECIES = [("homo_sapiens", 1), ("mus_musculus", 2), ("bos_taurus", 3)]
@@ -51,6 +54,8 @@ TIPO_ESPERADO = {"bos_taurus/demo": "demo", "bos_taurus/aula_granulosa_calor": "
 
 CAB_DEMO = ("amostra", "modulo", "grupo", "acesso", "raca", "tecido", "dataset")
 CAB_AULA = ("amostra", "condicao", "acesso", "raca", "tecido", "estacao", "dataset")
+CAB_CD4 = ("amostra", "condicao")
+_SUFIXO_EPI = ".bismark.cov.gz"
 # Tabelas FECHADAS (valor desconhecido = erro, nunca palpite). Raça: "Holstein", nunca
 # "Holandês" — o mesmo vocabulário do sub03 e do manifest da epigenômica (crítica v2, médio 12).
 RACA_DO_GRUPO_EPI = {"HF": "Holstein", "Nelore": "Nelore"}
@@ -138,19 +143,40 @@ def linhas_aula_esperadas() -> list[tuple[str, ...]]:
     return linhas
 
 
+def linhas_cd4_esperadas() -> list[tuple[str, ...]]:
+    """amostras_cd4_demo.tsv (coldata do exemplo da epigenômica, adendo v2 §A9.3): amostra =
+    nome do coverage do demo sem .bismark.cov.gz (a regra do montar_coverages); condicao = o
+    grupo do nome (_NOME_EPI). Exatamente 2 condições, 3 amostras em cada."""
+    linhas: list[tuple[str, ...]] = [CAB_CD4]
+    for arq in sorted(EPI_DEMO.glob("*" + _SUFIXO_EPI)):
+        m = _NOME_EPI.fullmatch(arq.name)
+        if m is None or m["grupo"] not in RACA_DO_GRUPO_EPI:
+            raise ValueError(f"coverage de demo fora do padrão (ou grupo fora da tabela): {arq.name!r}")
+        linhas.append((arq.name[:-len(_SUFIXO_EPI)], m["grupo"]))
+    return linhas
+
+
 GERADOS: Mapping[str, Callable[[], list[tuple[str, ...]]]] = {
     "demo": linhas_demo_esperadas,
     "aula_granulosa_calor": linhas_aula_esperadas,
 }
 
 
-def gerar(raiz: Path = PROJETOS_REPO) -> list[Path]:
-    """Grava os dois amostras.tsv (UTF-8, LF, TAB). Só o autor roda, pela linha de comando."""
+def _gravar_tsv(arq: Path, linhas: list[tuple[str, ...]]) -> Path:
+    arq.write_text("".join("\t".join(linha) + "\n" for linha in linhas), encoding="utf-8", newline="\n")
+    return arq
+
+
+def gerar(raiz: Path = PROJETOS_REPO, cd4: Optional[Path] = None) -> list[Path]:
+    """Grava os dois amostras.tsv e o amostras_cd4_demo.tsv (UTF-8, LF, TAB). Só o autor roda,
+    pela linha de comando. `cd4` None = o arquivo do repositório quando `raiz` é a do
+    repositório; numa raiz tmp, `<raiz>/amostras_cd4_demo.tsv` (o teste nunca grava no repo)."""
     gravados = []
     for slug, gerador in GERADOS.items():
-        arq = raiz / "bos_taurus" / slug / "amostras.tsv"
-        arq.write_text("".join("\t".join(linha) + "\n" for linha in gerador()), encoding="utf-8", newline="\n")
-        gravados.append(arq)
+        gravados.append(_gravar_tsv(raiz / "bos_taurus" / slug / "amostras.tsv", gerador()))
+    if cd4 is None:
+        cd4 = AMOSTRAS_CD4 if raiz == PROJETOS_REPO else raiz / AMOSTRAS_CD4.name
+    gravados.append(_gravar_tsv(cd4, linhas_cd4_esperadas()))
     return gravados
 
 
@@ -551,19 +577,85 @@ def test_canario_aula_com_3_condicoes_reprova_no_portao(tmp_path):
 
 def test_gerar_reproduz_os_arquivos_do_repositorio(tmp_path):
     """O gerador, numa árvore tmp, grava exatamente o que está versionado (a menos do fim de
-    linha, que o autocrlf do Windows pode trocar)."""
+    linha, que o autocrlf do Windows pode trocar) — os dois amostras.tsv e o
+    amostras_cd4_demo.tsv."""
     for slug in GERADOS:
         (tmp_path / "bos_taurus" / slug).mkdir(parents=True)
-    for arq in gerar(tmp_path):
-        versionado = PROJETOS_REPO / arq.relative_to(tmp_path)
+    gravados = gerar(tmp_path)
+    assert gravados[-1] == tmp_path / AMOSTRAS_CD4.name   # numa raiz tmp, nada vai ao repositório
+    for arq in gravados:
+        versionado = AMOSTRAS_CD4 if arq.name == AMOSTRAS_CD4.name else PROJETOS_REPO / arq.relative_to(tmp_path)
         assert arq.read_bytes() == versionado.read_bytes().replace(b"\r\n", b"\n")
         assert b"\r" not in arq.read_bytes()
+
+
+# ============================================================ amostras_cd4_demo.tsv (F6, §A9.3)
+_ERS = re.compile(r"ERS[0-9]+", re.ASCII)
+
+
+def problemas_cd4(cd4: Path, demo_tsv: Path) -> list[str]:
+    """Sincronia do coldata do exemplo da epigenômica com o amostras.tsv do demo: cada linha
+    corresponde a UMA linha `epigenomica` do demo, com o mesmo acesso ERS e condicao == grupo;
+    e o arquivo é o que o gerador deriva dos coverages (nunca digitado)."""
+    p = []
+    real = _ler_tsv(cd4)
+    if real != linhas_cd4_esperadas():
+        p.append("amostras_cd4_demo.tsv difere do gerado; regere com --gerar")
+    cab, *linhas = real
+    if tuple(cab) != CAB_CD4:
+        return p + [f"cabeçalho de amostras_cd4_demo.tsv: {cab} (esperado {CAB_CD4})"]
+    _, *demo = _ler_tsv(demo_tsv)
+    epi = {(linha[3], linha[2]) for linha in demo if linha[1] == "epigenomica"}
+    vistos = []
+    for amostra, condicao in linhas:
+        ers = _ERS.findall(amostra)
+        if len(ers) != 1:
+            p.append(f"cd4: {amostra} sem um acesso ERS no nome")
+            continue
+        if (ers[0], condicao) not in epi:
+            p.append(f"cd4: {ers[0]} com condição {condicao!r} sem linha epigenomica igual (acesso, grupo) no demo")
+        vistos.append(ers[0])
+    if sorted(vistos) != sorted(a for a, _ in epi):
+        p.append(f"cd4: acessos {sorted(vistos)} ≠ os da epigenômica no demo {sorted(a for a, _ in epi)}")
+    return p
+
+
+def test_amostras_cd4_controle_gerado_e_em_sincronia_com_o_demo():
+    assert problemas_cd4(AMOSTRAS_CD4, PROJETOS_REPO / "bos_taurus" / "demo" / "amostras.tsv") == []
+    # a tabela serve de coldata do DMC e casa com os coverages do demo (0 arquivos sem amostra)
+    assert formatos.coldata(AMOSTRAS_CD4).ok
+    v = formatos.coverages_e_amostras(EPI_DEMO, AMOSTRAS_CD4)
+    assert v.ok, v.falhas
+    assert v.perfil["por_condicao"] == {"HF": 3, "Nelore": 3} and v.perfil["n_arquivos_sem_amostra"] == 0
+
+
+@pytest.mark.parametrize("velho, novo, trecho", [
+    ("ERS4410317_CD4\tHF", "ERS4410317_CD4\tNelore", "ERS4410317 com condição 'Nelore'"),   # condição trocada
+    ("FILTERED_H82_HF_ERS4410318_CD4", "FILTERED_H82_HF_ERS4410399_CD4", "ERS4410399"),       # acesso trocado
+    ("amostra\tcondicao", "amostra\tgrupo", "cabeçalho"),
+], ids=["condicao_trocada", "acesso_trocado", "cabecalho"])
+def test_amostras_cd4_canarios(tmp_path, velho, novo, trecho):
+    arq = tmp_path / AMOSTRAS_CD4.name
+    texto = AMOSTRAS_CD4.read_text(encoding="utf-8")
+    assert texto.count(velho) == 1
+    arq.write_text(texto.replace(velho, novo), encoding="utf-8")
+    problemas = "\n".join(problemas_cd4(arq, PROJETOS_REPO / "bos_taurus" / "demo" / "amostras.tsv"))
+    assert "difere do gerado" in problemas and trecho in problemas, problemas
+
+
+def test_amostras_cd4_canario_demo_sem_a_linha(tmp_path):
+    """O lado do demo também morde: sem a linha epigenomica de um acesso, a sincronia reprova."""
+    demo = tmp_path / "amostras.tsv"
+    linhas = (PROJETOS_REPO / "bos_taurus" / "demo" / "amostras.tsv").read_text(encoding="utf-8").splitlines()
+    demo.write_text("\n".join(x for x in linhas if "ERS4410325" not in x) + "\n", encoding="utf-8")
+    assert any("ERS4410325" in x for x in problemas_cd4(AMOSTRAS_CD4, demo))
 
 
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="Regera os amostras.tsv de projetos/bos_taurus/{demo,aula_granulosa_calor}.")
+    ap = argparse.ArgumentParser(description="Regera os amostras.tsv de projetos/bos_taurus/{demo,aula_granulosa_calor} "
+                                             "e modules/epigenomica/data/amostras_cd4_demo.tsv.")
     ap.add_argument("--gerar", action="store_true", help="grava os arquivos (sem a flag, só confere)")
     args = ap.parse_args()
     if args.gerar:
@@ -571,5 +663,7 @@ if __name__ == "__main__":
             print(f"gravado: {caminho.relative_to(REPO_ROOT).as_posix()}")
     else:
         dif = problemas_amostras(PROJETOS_REPO)
+        dif += problemas_cd4(AMOSTRAS_CD4, PROJETOS_REPO / "bos_taurus" / "demo" / "amostras.tsv") \
+            if AMOSTRAS_CD4.is_file() else ["amostras_cd4_demo.tsv ausente"]
         print("\n".join(dif) or "amostras.tsv em dia com o gerador")
         sys.exit(1 if dif else 0)
