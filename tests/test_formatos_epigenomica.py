@@ -337,8 +337,9 @@ def test_stem_e_nome_por_condicao():
 
 # ============================================================== painel_genes_json
 def test_painel_108_controle():
-    bruto = PAINEL.read_bytes()
-    assert len(bruto) == 41_887 and hashlib.sha256(bruto).hexdigest().startswith("1d4bac77")
+    # conteudo normalizado em LF: o checkout do Windows (autocrlf) tem 41.887 B (CRLF); o CI, 40.469 B
+    bruto = PAINEL.read_bytes().replace(b"\r\n", b"\n")
+    assert len(bruto) == 40_469 and hashlib.sha256(bruto).hexdigest().startswith("d90f458d")
     v = formatos.validar("painel_genes_json", PAINEL)
     assert v.ok, v.falhas
     p = v.perfil
