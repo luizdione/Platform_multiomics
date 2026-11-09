@@ -37,6 +37,12 @@ autor fez ao aprovar a análise.
   o gene está mais expresso, em palavras. Se o contraste não estiver na ficha, não afirme
   direção nenhuma.
 - Não confunda "induzido/reprimido" com causalidade: é diferença de expressão entre condições.
+- Metilação: `meth.diff` e `n_hiper_no_grupo_a` têm direção. Hiper = mais metilada no grupo A
+  que no B (A − B; o grupo A é `escolha.grupo_a`). Nunca inverta.
+- ML: a classe positiva da ROC-AUC é `contraste.contraste_resumo.classe_y1`. Na matriz de
+  confusão, as linhas são as classes verdadeiras, y0 e y1. No texto, escreva as classes pelo
+  nome (`{{f:contraste.contraste_resumo.classe_y0}}`, `{{f:contraste.contraste_resumo.classe_y1}}`),
+  nunca como y0/y1.
 
 ## Variantes (genômica)
 
@@ -51,6 +57,12 @@ autor fez ao aprovar a análise.
   entram na extração e ficam fora das frequências.
 - O sistema confere números, não alcance: um VCF pode ter um só cromossomo, e a ficha não diz
   quais genes do painel caíram nele. Não afirme que todos os genes do painel têm variantes.
+
+## Contexto do run e alertas
+
+- A linha `Contexto:` diz a espécie e o subprojeto do run; não generalize para outra espécie.
+- Se a mensagem trouxer ALERTAS ou ALERTAS DO SUBPROJETO, declare cada um em limitações, com as
+  palavras do alerta, e não interprete o que ele invalida.
 
 ## Seções (use exatamente estes ids, nesta ordem, sem repetir)
 

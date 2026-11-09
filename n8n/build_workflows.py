@@ -2,7 +2,9 @@
 
 Um workflow por pipeline (`pipelines/<id>.yaml`), todos com o mesmo desenho:
 
-  Formulário (arquivos e/ou caminhos no servidor) → cria o run → envia as entradas (upload
+  Formulário (arquivos e/ou caminhos no servidor) → contexto do run (subprojeto escolhido da
+  lista que a ômica devolve NA HORA, sem privados; conferido antes do POST) → cria o run com
+  {pipeline, especie, subprojeto} → envia as entradas (upload
   cru; depois, em série, o {"caminho"} das que têm índice ao lado ou aceitam referência)
   → adapta as que não passam
   (agente local; se ele duvidar, o AUTOR mapeia num formulário só com cabeçalhos reais)
@@ -36,6 +38,7 @@ AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent
 sys.path.insert(0, str(RAIZ))
 
+from omica.contrato.formatos import DIRETORIOS  # noqa: E402
 from omica.pipelines import Entrada, Pipeline, carregar_pipelines, envio_formulario  # noqa: E402
 
 DIST = AQUI / "dist"
@@ -48,12 +51,16 @@ ESPERA_S = 110                              # < ESPERA_MAX_S da API (120)
 TETO_PASSO_H = 12                           # um passo esperando mais que isso vira falha
 TETO_FILA_H = 2                             # RAM cheia / fila fora por mais que isso: falha
 IDS_WORKFLOW = {"transcriptomica_de": "omicaTranscrDE01",
-                "genomica_painel": "omicaGenomPain01", "genomica_regioes": "omicaGenomRegi01"}
+                "genomica_painel": "omicaGenomPain01", "genomica_regioes": "omicaGenomRegi01",
+                # F6 (ESPEC §4 item 1): também com 16 caracteres; fixos, como os de cima
+                "ml_aims_vcf": "omicaMLAimsVcf01",
+                "epigenomica_dmc": "omicaEpigDMC0001", "epigenomica_mofa": "omicaEpigMOFA001"}
 TIMEOUT_CAMINHO_S = 600                     # PUT por caminho: sha completo de um BCF de ~1,9 GB
 # Extensões do campo de upload por formato. O navegador só filtra a janela de escolha (não é
 # portão: quem decide é o validador da ômica), mas um BED com outra extensão seria lido
 # 1-based pelo bcftools — o formulário não deve nem oferecer o .txt. O padrão é o de sempre.
-ACEITA_POR_FORMATO = {"painel_simbolos": ".txt", "bed_regioes": ".bed"}
+ACEITA_POR_FORMATO = {"painel_simbolos": ".txt", "bed_regioes": ".bed",
+                      "painel_genes_json": ".json", "rotulos_amostras": ".tsv,.txt"}
 ACEITA_PADRAO = ".tsv,.csv,.txt"
 
 
@@ -143,6 +150,42 @@ RUN = "$('Criar run').first().json.body.run_id"
 JS_ESCAPAR = r"""
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 """
+# X5′ (F6, crítica M4): o resumo do plano mostra os MESMOS avisos do subprojeto que o relatório
+# declara (servico.avisos_que_valem): o prefixo antes do primeiro ':', normalizado, é o módulo
+# do plano ou não é módulo nenhum (aviso geral). Sem isso, um run da transcriptômica mostrava o
+# aviso "epigenômica: painel_108 v1 … 13 loci errados" do demo. A normalização é a do Python
+# (_normalizar), não uma parecida: o JS não expõe a classe canônica (unicodedata.combining), mas
+# a reordenação do NFD a denuncia — marca de classe ≠ 0 troca de lugar com U+0334 (classe 1) ou
+# com U+0301 (classe 230); a de classe 0 (seletor de variação, sinal vocálico índico) não se
+# move, e o Python a mantém. `aparar` tira só o que o str.strip() tira (o trim() do JS difere em
+# \x1c-\x1f, \x85 e \ufeff), e ß → ss é a única diferença entre casefold e toLowerCase que dá
+# ASCII. MODULOS vem do builder, já normalizado (modulos_dos_avisos).
+JS_AVISOS = r"""
+const marcaCombinante = (c) => ('a' + c + '\u0334').normalize('NFD') !== 'a' + c + '\u0334' ||
+  ('a\u0301' + c).normalize('NFD') !== 'a\u0301' + c;
+const ESPACOS_DO_PYTHON = '[\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]+';
+const aparar = (s) => s.replace(new RegExp('^' + ESPACOS_DO_PYTHON + '|' + ESPACOS_DO_PYTHON + '$', 'g'), '');
+const normalizar = (s) => aparar(Array.from(s.normalize('NFKD')).filter((c) => !marcaCombinante(c)).join('')
+  .toLowerCase().replace(/\u00df/g, 'ss'));
+const avisosQueValem = (avisos, modulo) => {
+  const proprio = normalizar(String(modulo || ''));
+  return avisos.filter((a) => {
+    if (typeof a !== 'string' || aparar(a) === '') return false;
+    const prefixo = normalizar(a.split(':')[0]);
+    return prefixo === proprio || !MODULOS.includes(prefixo);
+  });
+};
+"""
+
+
+def modulos_dos_avisos() -> list[str]:
+    """Os ids de módulo que o prefixo de um aviso pode citar, já normalizados e em ordem (o dist
+    sai igual byte a byte): a MESMA lista do relatório — servico._ids_de_modulo, isto é, o
+    load_registry mais as pastas de modules/ com manifest (um manifest inválido não transforma
+    o aviso dele em aviso geral)."""
+    from omica.relatorio.servico import _ids_de_modulo, _normalizar
+
+    return sorted({_normalizar(m) for m in _ids_de_modulo()})
 
 
 # --------------------------------------------------------------- pipeline
@@ -157,14 +200,57 @@ def construir(p: Pipeline) -> dict[str, Any]:
     arquivos = [n for n, e in p.entradas.items() if envio_formulario(e) == "arquivo"]
     caminhos = [n for n, e in p.entradas.items() if envio_formulario(e) == "caminho"]
     campos = [campo_do_formulario(n, e) for n, e in p.entradas.items()]
-    g.no("Arquivos do experimento", "n8n-nodes-base.formTrigger", 2.6, (0, 300), {
+    g.no("Arquivos do experimento", "n8n-nodes-base.formTrigger", 2.6, (-1320, 300), {
         "formTitle": f"Ômica · {p.titulo}", "formDescription": p.descricao,
         "formFields": {"values": campos}, "options": {}},
         webhookId=str(uuid.uuid5(uuid.NAMESPACE_URL, f"omica/{p.id}/form")))
     # o n8n 2.34.5 registra o formulário publicado pelo webhookId (o `path` só vale no editor):
     # a URL de produção é /form/<webhookId>, que o main() imprime
     g.nos[-1]["parameters"]["path"] = f"omica-{p.id.replace('_', '-')}"
-    g.http("Criar run", (220, 300), "POST", f"{API}/runs", corpo=json.dumps({"pipeline": p.id}))
+
+    # ---- 0. contexto do run (D-10; adendo F6 §A10, item 0) ----------------
+    # A lista vem da ômica NA HORA: GET /subprojetos?pipeline=&privados=false aplica a MESMA
+    # regra do POST /runs (contexto.execucao_permitida) e tira os privados. Ela nunca é
+    # embutida no dist, que é versionado: subprojeto novo não exige regerar o workflow, e
+    # slug/título de privado não passam pelo formulário (que não tem login) nem pelos registros
+    # de execução do n8n (com privados=false, os `erros` da resposta só trazem os "repo:*": o
+    # erro de carga de um subprojeto de <dados> traria slug e título). Só o id vai para a
+    # opção. O par escolhido é conferido contra a lista antes do POST: fora dela, o run nem é
+    # criado.
+    g.http("Contextos do pipeline", (-1100, 300), "GET", f"{API}/subprojetos?pipeline={p.id}&privados=false")
+    g.code("Campos do contexto", (-880, 300), f"""
+const r = $input.first().json;
+if (r.statusCode !== 200) throw new Error('A ômica recusou listar os subprojetos (' + r.statusCode + '): ' + JSON.stringify(r.body).slice(0, 400));
+const lista = Array.isArray(r.body?.subprojetos) ? r.body.subprojetos : [];
+if (!lista.length) throw new Error('nenhum subprojeto aceita este pipeline: ' + {json.dumps(p.id)});
+const ids = lista.map((s) => String(s.id));
+return [{{ json: {{ campos: [{{ fieldLabel: 'Subprojeto', fieldName: 'contexto', fieldType: 'dropdown', requiredField: true,
+  fieldOptions: {{ values: ids.map((id) => ({{ option: id }})) }} }}], ids }} }}];
+""")
+    g.pagina("Contexto do run", (-660, 300), "Onde este run vai morar", "={{ JSON.stringify($json.campos) }}",
+             descricao="Só aparecem subprojetos em que a ômica aceita este pipeline; o demo é o dos selos.")
+    g.code("Conferir contexto", (-440, 300), """
+// o valor volta do navegador: só vale se for um dos ids que a ômica listou agora
+const escolhido = $input.first().json.contexto;
+const ids = $('Campos do contexto').first().json.ids || [];
+const c = typeof escolhido === 'string' ? escolhido : '';
+const i = c.indexOf('/');
+if (!ids.includes(c) || i <= 0 || i === c.length - 1) return [{ json: { ok: false } }];
+return [{ json: { ok: true, especie: c.slice(0, i), subprojeto: c.slice(i + 1) } }];
+""")
+    g.se("Contexto válido?", (-220, 300), "$json.ok === true")
+    g.fim("Fim: contexto recusado", (0, 520), "Contexto recusado",
+          "O subprojeto escolhido não está na lista desta ômica.")
+    for de, para in [("Arquivos do experimento", "Contextos do pipeline"), ("Contextos do pipeline", "Campos do contexto"),
+                     ("Campos do contexto", "Contexto do run"), ("Contexto do run", "Conferir contexto"),
+                     ("Conferir contexto", "Contexto válido?")]:
+        g.liga(de, para)
+    g.liga("Contexto válido?", "Fim: contexto recusado", 1)
+    # sem os dois campos, o POST cairia no demo (com aviso, mas sem ninguém ver): o Resumo do
+    # plano confere que o plano voltou para o par escolhido aqui
+    g.http("Criar run", (220, 300), "POST", f"{API}/runs",
+           corpo="={{ JSON.stringify({ pipeline: " + json.dumps(p.id)
+           + ", especie: $json.especie, subprojeto: $json.subprojeto }) }}")
     checa_201 = """
 const r = $input.first().json;
 if (r.statusCode !== 201) throw new Error('A ômica recusou criar o run: ' + JSON.stringify(r.body).slice(0, 400));
@@ -231,7 +317,7 @@ if (travadas.length) {{
 }}
 return [{{ json: {{ rota: 'adaptar', fila: ruins, i: 0 }} }}];
 """)
-    g.liga("Arquivos do experimento", "Criar run")
+    g.liga("Contexto válido?", "Criar run", 0)
     elos = ["Criar run"]
     if arquivos:
         elos += ["Separar arquivos", "Enviar entrada", "Conferir envios"]
@@ -399,9 +485,13 @@ const campos = Object.entries(rotulos).map(([nome, rotulo]) => ({{
   fieldOptions: {{ values: ((run.escolhas_opcoes[nome] || {{}}).valores || []).map((v) => ({{ option: String(v) }})) }} }}));
 return [{{ json: {{ campos }} }}];
 """)
+        # F6 (ESPEC §4 item 5): A == B dá 422 escolhas_iguais no plano, que cai em "Fim: plano
+        # recusado" com o detalhe; o formulário avisa antes
+        diferentes = any(e.diferente_de for e in p.escolhas_autor.values())
         g.pagina("Escolhas do autor", (2640, 900), "Escolhas do autor",
                  "={{ JSON.stringify($json.campos) }}",
-                 descricao="Só aparecem valores que existem nos seus arquivos.")
+                 descricao="Só aparecem valores que existem nos seus arquivos."
+                 + (" Os dois grupos têm de ser diferentes." if diferentes else ""))
         g.code("Montar escolhas", (2860, 900), f"""
 const f = $input.first().json;
 const nomes = {json.dumps(list(escolhas))};
@@ -420,43 +510,75 @@ return [{{ json: {{ escolhas: Object.fromEntries(nomes.map((n) => [n, f[n]])) }}
     g.liga(antes_do_plano, "Propor plano")
     extras_js, extras_chamada = "", ""
     if caminhos:
-        # Só com entrada por caminho (G1 §4.4): assim o JSON de quem só tem upload (a
-        # transcriptômica) continua byte a byte igual, sem reimportar nem refazer o E2E.
-        aviso = ("genes do painel em outros cromossomos não terão variantes extraídas"
-                 if any(e.formato == "painel_simbolos" for e in p.entradas.values())
-                 else "regiões em outros cromossomos não terão variantes extraídas")
-        extras_js = f"""
-// Entrada por caminho: modo, índice e o ALCANCE do VCF. Os contigs vêm do veredito da entrada
-// (perfil do vcf_indexado, lido pelo índice), não do plano: um BCF do Run 8 tem um cromossomo
-// só, e o portão confere números, não alcance — o autor tem de ver isso ANTES de aprovar.
-const vistas = $('Ler run (escolhas)').last().json.body.entradas || {{}};
-const extras = (n, e) => {{
-  let s = '';
-  if (e.modo === 'referencia') s += ' — por referência, sem cópia';
-  const indices = Object.keys(e.irmaos || {{}});
-  if (indices.length) s += ' + índice ' + esc(indices.join(', '));
+        # Só com entrada por caminho (G1 §4.4): quem só tem upload (a transcriptômica) não ganha
+        # o código dos extras.
+        if p.modulo == "genomica":
+            aviso = "'" + ("genes do painel em outros cromossomos não terão variantes extraídas"
+                           if any(e.formato == "painel_simbolos" for e in p.entradas.values())
+                           else "regiões em outros cromossomos não terão variantes extraídas") + "'"
+        elif p.modulo == "ml":
+            # F6 (adendo §A10 item 4, crítica M3/C11): a região é do DADO (escopo subprojeto) e
+            # vem do PLANO congelado, não do YAML — o subprojeto pode sobrescrevê-la
+            passo_ds = next(x.id for x in p.passos if x.script == "ml_dataset")
+            aviso = ("'o dataset usa só a região ' + esc(((p.passos.find((x) => x.id === "
+                     + json.dumps(passo_ds) + ") || {}).valores || {}).regiao ?? '(ausente no plano)') + "
+                     "' (parâmetro do subprojeto): um VCF sem esse contig dá 0 marcadores'")
+        else:
+            aviso = None  # epigenômica: sem bloco de contigs (o texto da genômica não vale aqui)
+        bloco_contigs = "" if aviso is None else f"""
   const perfil = ((vistas[n] || {{}}).veredito || {{}}).perfil || {{}};
   if (Array.isArray(perfil.contigs_com_dados)) {{
     const lista = perfil.contigs_com_dados;
     const total = Number(perfil.n_contigs_com_dados ?? lista.length);
     s += '<br>contigs com variantes: <b>' + (lista.length ? esc(lista.join(', ')) : '(nenhum)') + '</b>' +
       (total > lista.length ? ' (os ' + esc(lista.length) + ' primeiros de ' + esc(total) + ')' : '') +
-      ' — {aviso}';
-  }}
+      ' — ' + aviso;
+  }}"""
+        # F6: entrada de PASTA (formato em formatos.DIRETORIOS) mostra quantos arquivos entraram
+        linha_pasta = ("\n  if (e.tipo === 'diretorio') s += ' — pasta com ' + esc(e.n_membros) + ' arquivos';"
+                       if any(e.formato in DIRETORIOS for e in p.entradas.values()) else "")
+        cabeca = ("""
+// Entrada por caminho: modo, índice e, se for pasta, quantos arquivos entraram."""
+                  if aviso is None else """
+// Entrada por caminho: modo, índice e o ALCANCE do VCF. Os contigs vêm do veredito da entrada
+// (perfil do vcf_indexado, lido pelo índice), não do plano: um BCF do Run 8 tem um cromossomo
+// só, e o portão confere números, não alcance — o autor tem de ver isso ANTES de aprovar.
+const vistas = $('Ler run (escolhas)').last().json.body.entradas || {};
+const aviso = """ + aviso + ";")
+        extras_js = cabeca + f"""
+const extras = (n, e) => {{
+  let s = '';
+  if (e.modo === 'referencia') s += ' — por referência, sem cópia';
+  const indices = Object.keys(e.irmaos || {{}});
+  if (indices.length) s += ' + índice ' + esc(indices.join(', '));{linha_pasta}{bloco_contigs}
   return s;
 }};"""
         extras_chamada = " + extras(n, e)"
-    g.code("Resumo do plano", (3300, 900), JS_ESCAPAR + extras_js + """
+    js_avisos = "const MODULOS = " + json.dumps(modulos_dos_avisos()) + ";" + JS_AVISOS
+    g.code("Resumo do plano", (3300, 900), JS_ESCAPAR + js_avisos + """
 const r = $input.first().json;
 if (r.statusCode !== 200) return [{ json: { rota: 'recusado', detalhe: JSON.stringify(r.body).slice(0, 600) } }];
 const p = r.body;
+// D-10: o plano tem de ter voltado para o contexto escolhido no formulário. Sem especie e
+// subprojeto no corpo, o POST /runs cai no demo — aprovar isso rodaria no lugar errado.
+const pedido = $('Conferir contexto').first().json;
+const ctx = p.contexto || {};
+if (ctx.especie !== pedido.especie || ctx.subprojeto !== pedido.subprojeto) {
+  return [{ json: { rota: 'recusado', detalhe: 'O plano veio para o contexto ' + JSON.stringify(String(ctx.especie) + '/' + String(ctx.subprojeto)) +
+    ', não para o escolhido no formulário (' + JSON.stringify(pedido.especie + '/' + pedido.subprojeto) + '). Nada foi aprovado.' } }];
+}
+// só os avisos que valem para o módulo do plano: os mesmos que o relatório vai declarar
+const avisos = avisosQueValem(Array.isArray(ctx.avisos) ? ctx.avisos : [], p.modulo);
+const htmlCtx = '<p>Contexto: <b>' + esc(ctx.especie + '/' + ctx.subprojeto) + '</b> · assembly ' + esc(ctx.assembly) +
+  ' · sha ' + esc(String(ctx.sha256).slice(0, 12)) + '…</p>' +
+  (avisos.length ? '<h4>Avisos do subprojeto</h4><ul>' + avisos.map((a) => '<li>' + esc(a) + '</li>').join('') + '</ul>' : '');""" + extras_js + """
 const linhas = p.passos.map((x) => '<tr><td>' + esc(x.id) + '</td><td>' + esc(x.titulo) + '</td><td>' + esc(x.fila) +
   '</td><td>' + esc(x.mem_gb) + ' GB</td><td>' + esc(x.tempo_estimado) + '</td></tr>').join('');
 const ents = Object.entries(p.entradas).map(([n, e]) => '<li><b>' + esc(n) + '</b>: ' + esc(e.formato) + ', ' + esc(e.bytes) +
   ' bytes, sha256 ' + esc(String(e.sha256).slice(0, 12)) + '…' + (e.adaptacao ? ' — adaptada (' + esc(e.adaptacao.modo) + ', ' +
   esc(e.adaptacao.ops.length) + ' operações' + (e.adaptacao.modelo ? ', ' + esc(e.adaptacao.modelo) : '') + ')' : '')""" + extras_chamada + """ + '</li>').join('');
 const escs = Object.entries(p.escolhas).map(([k, v]) => '<li>' + esc(k) + ' = <b>' + esc(v) + '</b></li>').join('') || '<li>(nenhuma)</li>';
-const html = '<p>Confira tudo antes de aprovar. Depois de aprovado, NADA muda: cada passo roda exatamente com isto.</p>' +
+const html = htmlCtx + '<p>Confira tudo antes de aprovar. Depois de aprovado, NADA muda: cada passo roda exatamente com isto.</p>' +
   '<h4>Passos</h4><table><tr><th>passo</th><th>o quê</th><th>fila</th><th>RAM</th><th>tempo</th></tr>' + linhas + '</table>' +
   '<p>Pico de RAM: <b>' + esc(p.recursos.pico_mem_gb) + ' GB</b></p><h4>Entradas</h4><ul>' + ents + '</ul><h4>Escolhas</h4><ul>' + escs + '</ul>' +
   '<p><small>plano ' + esc(p.plano_sha256) + '</small></p>';

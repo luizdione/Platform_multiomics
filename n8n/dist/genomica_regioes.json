@@ -33,10 +33,138 @@
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.6,
       "position": [
-        0,
+        -1320,
         300
       ],
       "webhookId": "55903e71-5266-5a5f-af4e-95a133058456"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://omica-web:8710/api/v1/subprojetos?pipeline=genomica_regioes&privados=false",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c38f1359-8299-5c1f-8b1a-3b5a3dfc2724",
+      "name": "Contextos do pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1100,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode !== 200) throw new Error('A ômica recusou listar os subprojetos (' + r.statusCode + '): ' + JSON.stringify(r.body).slice(0, 400));\nconst lista = Array.isArray(r.body?.subprojetos) ? r.body.subprojetos : [];\nif (!lista.length) throw new Error('nenhum subprojeto aceita este pipeline: ' + \"genomica_regioes\");\nconst ids = lista.map((s) => String(s.id));\nreturn [{ json: { campos: [{ fieldLabel: 'Subprojeto', fieldName: 'contexto', fieldType: 'dropdown', requiredField: true,\n  fieldOptions: { values: ids.map((id) => ({ option: id })) } }], ids } }];\n"
+      },
+      "id": "50729e68-4915-5412-a179-cecb84fc4403",
+      "name": "Campos do contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify($json.campos) }}",
+        "options": {
+          "formTitle": "Onde este run vai morar",
+          "formDescription": "Só aparecem subprojetos em que a ômica aceita este pipeline; o demo é o dos selos.",
+          "buttonLabel": "Continuar"
+        }
+      },
+      "id": "97fd0707-d9f2-55e4-8fd3-1f294164ab51",
+      "name": "Contexto do run",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        -660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// o valor volta do navegador: só vale se for um dos ids que a ômica listou agora\nconst escolhido = $input.first().json.contexto;\nconst ids = $('Campos do contexto').first().json.ids || [];\nconst c = typeof escolhido === 'string' ? escolhido : '';\nconst i = c.indexOf('/');\nif (!ids.includes(c) || i <= 0 || i === c.length - 1) return [{ json: { ok: false } }];\nreturn [{ json: { ok: true, especie: c.slice(0, i), subprojeto: c.slice(i + 1) } }];\n"
+      },
+      "id": "a19b1604-d216-57bf-9f57-1e1d412d304d",
+      "name": "Conferir contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ea5a4f91-cbd4-5a08-8de5-a34de041f16c",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "1ccdbfdd-c1e6-5428-a444-265ad8174459",
+      "name": "Contexto válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Contexto recusado",
+        "completionMessage": "O subprojeto escolhido não está na lista desta ômica."
+      },
+      "id": "51439c3c-bb35-57c3-a716-392606ad6281",
+      "name": "Fim: contexto recusado",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        520
+      ]
     },
     {
       "parameters": {
@@ -55,7 +183,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"pipeline\": \"genomica_regioes\"}"
+        "jsonBody": "={{ JSON.stringify({ pipeline: \"genomica_regioes\", especie: $json.especie, subprojeto: $json.subprojeto }) }}"
       },
       "id": "33dd23d3-caa1-5f19-a44c-2b2ab2823d59",
       "name": "Criar run",
@@ -929,7 +1057,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]));\n\n// Entrada por caminho: modo, índice e o ALCANCE do VCF. Os contigs vêm do veredito da entrada\n// (perfil do vcf_indexado, lido pelo índice), não do plano: um BCF do Run 8 tem um cromossomo\n// só, e o portão confere números, não alcance — o autor tem de ver isso ANTES de aprovar.\nconst vistas = $('Ler run (escolhas)').last().json.body.entradas || {};\nconst extras = (n, e) => {\n  let s = '';\n  if (e.modo === 'referencia') s += ' — por referência, sem cópia';\n  const indices = Object.keys(e.irmaos || {});\n  if (indices.length) s += ' + índice ' + esc(indices.join(', '));\n  const perfil = ((vistas[n] || {}).veredito || {}).perfil || {};\n  if (Array.isArray(perfil.contigs_com_dados)) {\n    const lista = perfil.contigs_com_dados;\n    const total = Number(perfil.n_contigs_com_dados ?? lista.length);\n    s += '<br>contigs com variantes: <b>' + (lista.length ? esc(lista.join(', ')) : '(nenhum)') + '</b>' +\n      (total > lista.length ? ' (os ' + esc(lista.length) + ' primeiros de ' + esc(total) + ')' : '') +\n      ' — regiões em outros cromossomos não terão variantes extraídas';\n  }\n  return s;\n};\nconst r = $input.first().json;\nif (r.statusCode !== 200) return [{ json: { rota: 'recusado', detalhe: JSON.stringify(r.body).slice(0, 600) } }];\nconst p = r.body;\nconst linhas = p.passos.map((x) => '<tr><td>' + esc(x.id) + '</td><td>' + esc(x.titulo) + '</td><td>' + esc(x.fila) +\n  '</td><td>' + esc(x.mem_gb) + ' GB</td><td>' + esc(x.tempo_estimado) + '</td></tr>').join('');\nconst ents = Object.entries(p.entradas).map(([n, e]) => '<li><b>' + esc(n) + '</b>: ' + esc(e.formato) + ', ' + esc(e.bytes) +\n  ' bytes, sha256 ' + esc(String(e.sha256).slice(0, 12)) + '…' + (e.adaptacao ? ' — adaptada (' + esc(e.adaptacao.modo) + ', ' +\n  esc(e.adaptacao.ops.length) + ' operações' + (e.adaptacao.modelo ? ', ' + esc(e.adaptacao.modelo) : '') + ')' : '') + extras(n, e) + '</li>').join('');\nconst escs = Object.entries(p.escolhas).map(([k, v]) => '<li>' + esc(k) + ' = <b>' + esc(v) + '</b></li>').join('') || '<li>(nenhuma)</li>';\nconst html = '<p>Confira tudo antes de aprovar. Depois de aprovado, NADA muda: cada passo roda exatamente com isto.</p>' +\n  '<h4>Passos</h4><table><tr><th>passo</th><th>o quê</th><th>fila</th><th>RAM</th><th>tempo</th></tr>' + linhas + '</table>' +\n  '<p>Pico de RAM: <b>' + esc(p.recursos.pico_mem_gb) + ' GB</b></p><h4>Entradas</h4><ul>' + ents + '</ul><h4>Escolhas</h4><ul>' + escs + '</ul>' +\n  '<p><small>plano ' + esc(p.plano_sha256) + '</small></p>';\nconst campos = [{ fieldType: 'html', html }, { fieldLabel: 'Decisão', fieldName: 'decisao', fieldType: 'radio', requiredField: true,\n  fieldOptions: { values: [{ option: 'Aprovar e executar' }, { option: 'Cancelar' }] } }];\nreturn [{ json: { rota: 'aprovar', campos, plano_sha256: p.plano_sha256, passos: p.passos.map((x) => x.id) } }];\n"
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]));\nconst MODULOS = [\"epigenomica\", \"genomica\", \"ml\", \"transcriptomica\"];\nconst marcaCombinante = (c) => ('a' + c + '\\u0334').normalize('NFD') !== 'a' + c + '\\u0334' ||\n  ('a\\u0301' + c).normalize('NFD') !== 'a\\u0301' + c;\nconst ESPACOS_DO_PYTHON = '[\\\\t\\\\n\\\\v\\\\f\\\\r\\\\x1c-\\\\x1f \\\\x85\\\\xa0\\\\u1680\\\\u2000-\\\\u200a\\\\u2028\\\\u2029\\\\u202f\\\\u205f\\\\u3000]+';\nconst aparar = (s) => s.replace(new RegExp('^' + ESPACOS_DO_PYTHON + '|' + ESPACOS_DO_PYTHON + '$', 'g'), '');\nconst normalizar = (s) => aparar(Array.from(s.normalize('NFKD')).filter((c) => !marcaCombinante(c)).join('')\n  .toLowerCase().replace(/\\u00df/g, 'ss'));\nconst avisosQueValem = (avisos, modulo) => {\n  const proprio = normalizar(String(modulo || ''));\n  return avisos.filter((a) => {\n    if (typeof a !== 'string' || aparar(a) === '') return false;\n    const prefixo = normalizar(a.split(':')[0]);\n    return prefixo === proprio || !MODULOS.includes(prefixo);\n  });\n};\n\nconst r = $input.first().json;\nif (r.statusCode !== 200) return [{ json: { rota: 'recusado', detalhe: JSON.stringify(r.body).slice(0, 600) } }];\nconst p = r.body;\n// D-10: o plano tem de ter voltado para o contexto escolhido no formulário. Sem especie e\n// subprojeto no corpo, o POST /runs cai no demo — aprovar isso rodaria no lugar errado.\nconst pedido = $('Conferir contexto').first().json;\nconst ctx = p.contexto || {};\nif (ctx.especie !== pedido.especie || ctx.subprojeto !== pedido.subprojeto) {\n  return [{ json: { rota: 'recusado', detalhe: 'O plano veio para o contexto ' + JSON.stringify(String(ctx.especie) + '/' + String(ctx.subprojeto)) +\n    ', não para o escolhido no formulário (' + JSON.stringify(pedido.especie + '/' + pedido.subprojeto) + '). Nada foi aprovado.' } }];\n}\n// só os avisos que valem para o módulo do plano: os mesmos que o relatório vai declarar\nconst avisos = avisosQueValem(Array.isArray(ctx.avisos) ? ctx.avisos : [], p.modulo);\nconst htmlCtx = '<p>Contexto: <b>' + esc(ctx.especie + '/' + ctx.subprojeto) + '</b> · assembly ' + esc(ctx.assembly) +\n  ' · sha ' + esc(String(ctx.sha256).slice(0, 12)) + '…</p>' +\n  (avisos.length ? '<h4>Avisos do subprojeto</h4><ul>' + avisos.map((a) => '<li>' + esc(a) + '</li>').join('') + '</ul>' : '');\n// Entrada por caminho: modo, índice e o ALCANCE do VCF. Os contigs vêm do veredito da entrada\n// (perfil do vcf_indexado, lido pelo índice), não do plano: um BCF do Run 8 tem um cromossomo\n// só, e o portão confere números, não alcance — o autor tem de ver isso ANTES de aprovar.\nconst vistas = $('Ler run (escolhas)').last().json.body.entradas || {};\nconst aviso = 'regiões em outros cromossomos não terão variantes extraídas';\nconst extras = (n, e) => {\n  let s = '';\n  if (e.modo === 'referencia') s += ' — por referência, sem cópia';\n  const indices = Object.keys(e.irmaos || {});\n  if (indices.length) s += ' + índice ' + esc(indices.join(', '));\n  const perfil = ((vistas[n] || {}).veredito || {}).perfil || {};\n  if (Array.isArray(perfil.contigs_com_dados)) {\n    const lista = perfil.contigs_com_dados;\n    const total = Number(perfil.n_contigs_com_dados ?? lista.length);\n    s += '<br>contigs com variantes: <b>' + (lista.length ? esc(lista.join(', ')) : '(nenhum)') + '</b>' +\n      (total > lista.length ? ' (os ' + esc(lista.length) + ' primeiros de ' + esc(total) + ')' : '') +\n      ' — ' + aviso;\n  }\n  return s;\n};\nconst linhas = p.passos.map((x) => '<tr><td>' + esc(x.id) + '</td><td>' + esc(x.titulo) + '</td><td>' + esc(x.fila) +\n  '</td><td>' + esc(x.mem_gb) + ' GB</td><td>' + esc(x.tempo_estimado) + '</td></tr>').join('');\nconst ents = Object.entries(p.entradas).map(([n, e]) => '<li><b>' + esc(n) + '</b>: ' + esc(e.formato) + ', ' + esc(e.bytes) +\n  ' bytes, sha256 ' + esc(String(e.sha256).slice(0, 12)) + '…' + (e.adaptacao ? ' — adaptada (' + esc(e.adaptacao.modo) + ', ' +\n  esc(e.adaptacao.ops.length) + ' operações' + (e.adaptacao.modelo ? ', ' + esc(e.adaptacao.modelo) : '') + ')' : '') + extras(n, e) + '</li>').join('');\nconst escs = Object.entries(p.escolhas).map(([k, v]) => '<li>' + esc(k) + ' = <b>' + esc(v) + '</b></li>').join('') || '<li>(nenhuma)</li>';\nconst html = htmlCtx + '<p>Confira tudo antes de aprovar. Depois de aprovado, NADA muda: cada passo roda exatamente com isto.</p>' +\n  '<h4>Passos</h4><table><tr><th>passo</th><th>o quê</th><th>fila</th><th>RAM</th><th>tempo</th></tr>' + linhas + '</table>' +\n  '<p>Pico de RAM: <b>' + esc(p.recursos.pico_mem_gb) + ' GB</b></p><h4>Entradas</h4><ul>' + ents + '</ul><h4>Escolhas</h4><ul>' + escs + '</ul>' +\n  '<p><small>plano ' + esc(p.plano_sha256) + '</small></p>';\nconst campos = [{ fieldType: 'html', html }, { fieldLabel: 'Decisão', fieldName: 'decisao', fieldType: 'radio', requiredField: true,\n  fieldOptions: { values: [{ option: 'Aprovar e executar' }, { option: 'Cancelar' }] } }];\nreturn [{ json: { rota: 'aprovar', campos, plano_sha256: p.plano_sha256, passos: p.passos.map((x) => x.id) } }];\n"
       },
       "id": "9e3ba5e4-2ed6-5fa6-89de-300f3a33efa5",
       "name": "Resumo do plano",
@@ -2141,7 +2269,69 @@
       "main": [
         [
           {
+            "node": "Contextos do pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contextos do pipeline": {
+      "main": [
+        [
+          {
+            "node": "Campos do contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campos do contexto": {
+      "main": [
+        [
+          {
+            "node": "Contexto do run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contexto do run": {
+      "main": [
+        [
+          {
+            "node": "Conferir contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir contexto": {
+      "main": [
+        [
+          {
+            "node": "Contexto válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contexto válido?": {
+      "main": [
+        [
+          {
             "node": "Criar run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: contexto recusado",
             "type": "main",
             "index": 0
           }

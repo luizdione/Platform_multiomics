@@ -1,0 +1,3386 @@
+{
+  "id": "omicaMLAimsVcf01",
+  "name": "Ômica · Duas raças por genótipos: CV aninhada, SHAP, painel mínimo e robustez",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Ômica · Duas raças por genótipos: CV aninhada, SHAP, painel mínimo e robustez",
+        "formDescription": "VCF/BCF indexado com genótipos e uma tabela amostra→grupo. O autor escolhe as duas classes; a matriz 0/1/2 sai de uma região fixa do BTA14; RF e XGBoost sob CV aninhada, SHAP, painel mínimo, robustez A1/A2/A3 e diagnóstico de empates.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "VCF.gz ou BCF indexado COM genótipos do BTA14 — caminho no servidor (/data/1000bg_vcf/… ou /data/omica/entradas/…)",
+              "fieldName": "vcf",
+              "fieldType": "text",
+              "requiredField": true,
+              "placeholder": "/data/1000bg_vcf/Chr14-Run8-TAUIND-public.bcf"
+            },
+            {
+              "fieldLabel": "Tabela de rótulos (.tsv com colunas amostra e grupo; ≥10 amostras por grupo)",
+              "fieldName": "rotulos",
+              "fieldType": "file",
+              "requiredField": true,
+              "multipleFiles": false,
+              "acceptFileTypes": ".tsv,.txt"
+            }
+          ]
+        },
+        "options": {},
+        "path": "omica-ml-aims-vcf"
+      },
+      "id": "c4b99318-e35d-5c16-9bb3-7db985fac23d",
+      "name": "Arquivos do experimento",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -1320,
+        300
+      ],
+      "webhookId": "ba2d82eb-e07f-58a7-9c5e-b2eed161ebb8"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://omica-web:8710/api/v1/subprojetos?pipeline=ml_aims_vcf&privados=false",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "525f8286-b49e-5adf-a627-a82f8b91cff3",
+      "name": "Contextos do pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1100,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode !== 200) throw new Error('A ômica recusou listar os subprojetos (' + r.statusCode + '): ' + JSON.stringify(r.body).slice(0, 400));\nconst lista = Array.isArray(r.body?.subprojetos) ? r.body.subprojetos : [];\nif (!lista.length) throw new Error('nenhum subprojeto aceita este pipeline: ' + \"ml_aims_vcf\");\nconst ids = lista.map((s) => String(s.id));\nreturn [{ json: { campos: [{ fieldLabel: 'Subprojeto', fieldName: 'contexto', fieldType: 'dropdown', requiredField: true,\n  fieldOptions: { values: ids.map((id) => ({ option: id })) } }], ids } }];\n"
+      },
+      "id": "eccab302-2d4f-5ddb-969a-0259bf229547",
+      "name": "Campos do contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify($json.campos) }}",
+        "options": {
+          "formTitle": "Onde este run vai morar",
+          "formDescription": "Só aparecem subprojetos em que a ômica aceita este pipeline; o demo é o dos selos.",
+          "buttonLabel": "Continuar"
+        }
+      },
+      "id": "68c6b3ef-bff2-521f-b496-5c122b08eb98",
+      "name": "Contexto do run",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        -660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// o valor volta do navegador: só vale se for um dos ids que a ômica listou agora\nconst escolhido = $input.first().json.contexto;\nconst ids = $('Campos do contexto').first().json.ids || [];\nconst c = typeof escolhido === 'string' ? escolhido : '';\nconst i = c.indexOf('/');\nif (!ids.includes(c) || i <= 0 || i === c.length - 1) return [{ json: { ok: false } }];\nreturn [{ json: { ok: true, especie: c.slice(0, i), subprojeto: c.slice(i + 1) } }];\n"
+      },
+      "id": "e0434364-7251-5172-a1e9-f794cd4c6d21",
+      "name": "Conferir contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1d8a04b2-862b-5d43-9949-ad2a4822d4bb",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "6a9122c6-4823-5412-8fe2-7e02cbb51d95",
+      "name": "Contexto válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Contexto recusado",
+        "completionMessage": "O subprojeto escolhido não está na lista desta ômica."
+      },
+      "id": "18cc0fab-76da-53e6-9207-f8f415128ec1",
+      "name": "Fim: contexto recusado",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://omica-web:8710/api/v1/runs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ pipeline: \"ml_aims_vcf\", especie: $json.especie, subprojeto: $json.subprojeto }) }}"
+      },
+      "id": "ab53d7f0-74ca-5f26-85cf-a938a650dcb6",
+      "name": "Criar run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode !== 201) throw new Error('A ômica recusou criar o run: ' + JSON.stringify(r.body).slice(0, 400));\nconst bin = $('Arquivos do experimento').first().binary || {};\nreturn [\"rotulos\"].map((nome) => {\n  if (!bin[nome]) throw new Error('Arquivo ausente no formulário: ' + nome);\n  return { json: { nome }, binary: { arquivo: bin[nome] } };\n});\n"
+      },
+      "id": "606f647b-c028-5ae8-81b8-5e86509eedf2",
+      "name": "Separar arquivos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/entradas/' + $json.nome }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/octet-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "arquivo"
+      },
+      "id": "0e93c3d7-c0e2-5c87-b0c3-938352446840",
+      "name": "Enviar entrada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ruins = $input.all().filter((i) => i.json.statusCode !== 200);\nif (ruins.length) throw new Error('Envio recusado: ' + ruins.map((i) => JSON.stringify(i.json.body)).join(' | ').slice(0, 600));\nreturn [{ json: {} }];\n"
+      },
+      "id": "07920a0a-cfb1-5501-9be9-a32c009a980b",
+      "name": "Conferir envios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const f = $('Arquivos do experimento').first().json;\n// o gatilho devolve o texto pelo fieldName; o rótulo é só a rede de segurança\nconst rotulos = {\"vcf\": \"VCF.gz ou BCF indexado COM genótipos do BTA14 — caminho no servidor (/data/1000bg_vcf/… ou /data/omica/entradas/…)\"};\nreturn [\"vcf\"].map((nome) => {\n  const bruto = f[nome] ?? f[rotulos[nome]];\n  const caminho = typeof bruto === 'string' ? bruto.trim() : '';\n  if (!caminho) throw new Error('Caminho vazio no formulário: ' + nome);\n  return { json: { nome, caminho } };\n});\n"
+      },
+      "id": "fdd36d4a-8ebd-540f-b7b4-deabb3277098",
+      "name": "Separar caminhos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/entradas/' + $json.nome }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ caminho: $json.caminho }) }}"
+      },
+      "id": "a577f65a-6a5d-5e8a-a61c-748ce0ecda49",
+      "name": "Enviar caminhos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -160
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const nomes = $('Separar caminhos').all().map((i) => i.json.nome);\nconst ruins = $input.all().map((i, k) => [nomes[k], i.json]).filter(([, r]) => r.statusCode !== 200);\nif (!ruins.length) return [{ json: { rota: 'ok' } }];\nconst det = ruins.map(([n, r]) => n + ' (' + r.statusCode + '): ' + JSON.stringify(r.body)).join(' | ');\nreturn [{ json: { rota: 'recusado', detalhe: det.slice(0, 800) } }];\n"
+      },
+      "id": "ee002a5a-78b6-504c-9f22-b6cb14a4a141",
+      "name": "Conferir caminhos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "341a2be7-dd02-59b1-86fb-07622e5fe9f0",
+              "leftValue": "={{ $json.rota === 'ok' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "0dac8e55-22bf-5beb-866e-650a73b21a83",
+      "name": "Caminhos aceitos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/abortar' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "35819fba-b3af-5181-ab2d-e1574d351bfd",
+      "name": "Cancelar run (caminho)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -260
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Caminho recusado pela ômica",
+        "completionMessage": "={{ 'Nada foi executado. ' + ($json.statusCode === 200 ? 'O run foi cancelado. ' : 'O run NÃO foi cancelado (status ' + $json.statusCode + '): aborte-o pela ômica. ') + 'A ômica recusou: ' + $('Conferir caminhos').last().json.detalhe }}"
+      },
+      "id": "ead973e4-7a14-5675-b71e-a496c1b2da84",
+      "name": "Fim: caminho recusado",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1540,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "bcb44a78-0023-50c7-a47f-126a778f5d79",
+      "name": "Ler run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const run = $input.first().json.body;\nconst adaptaveis = [];\nconst ruins = Object.entries(run.entradas).filter(([, r]) => !r.veredito.ok).map(([n]) => n);\nconst travadas = ruins.filter((n) => !adaptaveis.includes(n));\nif (travadas.length) {\n  const det = travadas.map((n) => n + ': ' + run.entradas[n].veredito.falhas.slice(0, 3).join('; ')).join(' | ');\n  return [{ json: { rota: 'invalida', detalhe: det } }];\n}\nreturn [{ json: { rota: 'adaptar', fila: ruins, i: 0 } }];\n"
+      },
+      "id": "9f7b9642-107f-584c-b95a-f450cbc572e2",
+      "name": "Fila de adaptação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7bdacfba-cb57-5899-be82-dea217bd2b52",
+              "leftValue": "={{ $json.rota !== 'invalida' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "7c006bd5-5eb8-5b09-9add-ffe9cfbf663f",
+      "name": "Entradas válidas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Entrada fora do formato",
+        "completionMessage": "={{ 'Uma entrada que o pipeline não adapta veio fora do formato: ' + $json.detalhe }}"
+      },
+      "id": "cfefd6eb-7230-552c-8484-f3052a4239df",
+      "name": "Fim: entrada inválida",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1760,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst e = $input.first().json;\nlet fila = e.fila, i = e.i;\nif (fila === undefined) {\n  const ultimo = $('Ler adaptação').isExecuted ? $('Ler adaptação').last().json : null;\n  fila = ultimo ? ultimo.fila : $('Fila de adaptação').first().json.fila;\n  i = ultimo ? ultimo.i : 0;\n}\nreturn [{ json: { fila, i, nome: fila[i] ?? null, rota: i < fila.length ? 'adaptar' : 'fim' } }];\n"
+      },
+      "id": "207270fb-b5ba-5845-9eaf-9fbd5d419abd",
+      "name": "Entrada atual",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7fa15188-88ef-54b0-ad99-1e2560da66e3",
+              "leftValue": "={{ $json.rota === 'adaptar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "6d4b2569-6151-57ac-b4e0-5369b9d5194d",
+      "name": "Falta adaptar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/entradas/' + $json.nome + '/adaptar' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 900000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c48032d4-f838-521a-8094-6211b8fe8102",
+      "name": "Adaptar (agente)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst atual = $('Entrada atual').last().json;\nlet rota = 'erro';\nif (r.statusCode === 200 && r.body.ok) rota = 'proxima';\nelse if (r.statusCode === 200) rota = 'autor';\nelse if (r.statusCode === 503) rota = 'motor';\nreturn [{ json: { rota, corpo: r.body, status: r.statusCode, nome: atual.nome, fila: atual.fila, i: atual.i } }];\n"
+      },
+      "id": "f04e56ff-ac43-5099-b2b4-1a34760771bd",
+      "name": "Ler adaptação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c588b795-f35f-5f81-a43e-b7cf51b58081",
+              "leftValue": "={{ $json.rota === 'proxima' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "45362794-c6eb-5c0e-9afd-32ca50a76aa6",
+      "name": "Adaptou?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $input.first().json;\nreturn [{ json: { fila: e.fila, i: e.i + 1 } }];\n"
+      },
+      "id": "43168249-3627-55d0-889b-82a2f80c9604",
+      "name": "Avançar entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "18cceea4-cfd7-5b6c-bef1-2bde000ff1e8",
+              "leftValue": "={{ $json.rota === 'autor' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "0936a4e1-5f9d-5ae3-bfe3-654562a3a1fc",
+      "name": "Levar ao autor?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2860,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]));\n\nconst e = $input.first().json;\nconst op = e.corpo.opcoes || {};\nconst cab = op.cabecalho || [];\nconst formato = {\"vcf\": \"vcf_indexado\", \"rotulos\": \"rotulos_amostras\"}[e.nome];\nconst opcoes = cab.map((c) => ({ option: c }));\nconst falhas = (((e.corpo.run || {}).entradas || {})[e.nome] || {}).veredito?.falhas || [];\nconst li = (xs) => xs.map((x) => '<li>' + esc(x) + '</li>').join('');\nconst campos = [{ fieldType: 'html', html: '<p>Entrada <b>' + esc(e.nome) + '</b> (' + esc(formato) + ').</p>' +\n  '<p>O que o validador apontou no arquivo:</p><ul>' + li(falhas.slice(0, 8)) + '</ul>' +\n  '<p>O que o agente não conseguiu resolver:</p><ul>' + li(e.corpo.excecoes || []) + '</ul>' +\n  '<p>Se o problema é de NOME DE COLUNA, escolha abaixo as colunas reais (nada é criado: só renomeado, ' +\n  'selecionado ou repetido). Se é de VALOR (amostra numérica, condição com acento ou espaço, número de ' +\n  'condições), corrija o arquivo e envie de novo.</p>' }];\nfor (const alvo of (op.alvos || [])) {\n  campos.push({ fieldLabel: 'Coluna que é «' + alvo + '»', fieldName: 'alvo__' + alvo, fieldType: 'dropdown',\n    fieldOptions: { values: opcoes } });\n}\n// alvo que pode ser preenchido repetindo outra coluna (contagens: gene_name ← gene_id)\nfor (const [alvo, fonte] of Object.entries(op.copia_se_ausente || {})) {\n  campos.push({ fieldLabel: 'Coluna que é «' + alvo + '» (sem ela: repetir o ' + fonte + ')', fieldName: 'copia__' + alvo,\n    fieldType: 'dropdown', fieldOptions: { values: [{ option: '(repetir o ' + fonte + ')' }, ...opcoes] } });\n}\nif (formato === 'contagens_genes') {\n  campos.push({ fieldLabel: 'Colunas que são AMOSTRAS (contagens)', fieldName: 'amostras', fieldType: 'checkbox',\n    fieldOptions: { values: opcoes } });\n}\ncampos.push({ fieldLabel: 'O que fazer', fieldName: 'decisao', fieldType: 'radio', requiredField: true,\n  fieldOptions: { values: [{ option: 'Aplicar este mapeamento' }, { option: 'Corrigir o arquivo e enviar de novo' }] } });\nreturn [{ json: { campos, nome: e.nome, formato, copia_se_ausente: op.copia_se_ausente || {}, falhas } }];\n"
+      },
+      "id": "7722d9c2-eb61-56b7-9e82-493d79d1285d",
+      "name": "Campos do mapeamento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify($json.campos) }}",
+        "options": {
+          "formTitle": "Mapear colunas",
+          "formDescription": "",
+          "buttonLabel": "Aplicar mapeamento"
+        }
+      },
+      "id": "ae7f227b-753b-5790-8a9e-5f7db73648c6",
+      "name": "Mapeamento pelo autor",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        3300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ordem: renomear (alvos e colunas escolhidas) → copiar (alvo ausente repete a fonte) → selecionar\nconst f = $input.first().json;\nconst ctx = $('Campos do mapeamento').last().json;\nconst ops = [];\nconst usadas = [];\nfor (const [k, v] of Object.entries(f)) {\n  if (!k.startsWith('alvo__') || !v) continue;\n  const alvo = k.slice(6);\n  usadas.push(v);\n  if (v !== alvo) ops.push({ op: 'renomear', origem: v, destino: alvo });\n}\nconst copias = [];\nfor (const [alvo, fonte] of Object.entries(ctx.copia_se_ausente || {})) {\n  const v = f['copia__' + alvo];\n  // \"repetir\", vazio ou a MESMA coluna já usada (dois renomear sobre ela seriam descartados)\n  if (!v || v.startsWith('(repetir') || usadas.includes(v)) { copias.push({ op: 'copiar', origem: fonte, destino: alvo }); continue; }\n  usadas.push(v);\n  if (v !== alvo) ops.push({ op: 'renomear', origem: v, destino: alvo });\n}\nops.push(...copias);\nif (ctx.formato === 'contagens_genes') {\n  const amostras = [].concat(f.amostras || []).filter((c) => !usadas.includes(c));\n  ops.push({ op: 'selecionar', colunas: ['gene_id', 'gene_name', ...amostras] });\n}\nreturn [{ json: { nome: ctx.nome, ops } }];\n"
+      },
+      "id": "0f66873d-68ac-57a5-a82e-90bebbd09f9e",
+      "name": "Ops do autor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/entradas/' + $json.nome + '/adaptar' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ops: $json.ops }) }}"
+      },
+      "id": "2ec6833e-d983-5a1a-8214-20d2942a8f7f",
+      "name": "Adaptar (autor)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "29eb3744-a672-58a8-a4c2-ce989d22347b",
+              "leftValue": "={{ $json.rota === 'motor' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a7fa0d64-e92a-52e0-a9fb-68b18267c20c",
+      "name": "Agente indisponível?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify([{ fieldType: 'html', html: '<p>O modelo local não pode rodar agora (GPU reservada pelo dono ou outra inferência na vez): ' + String($json.corpo?.detail?.detalhe ?? '').replace(/[<>&]/g, '') + '</p>' }, { fieldLabel: 'O que fazer', fieldName: 'decisao', fieldType: 'radio', fieldOptions: { values: [{ option: 'Esperar 2 minutos e tentar de novo' }, { option: 'Mapear eu mesmo' }] }, requiredField: true }]) }}",
+        "options": {
+          "formTitle": "Agente local indisponível",
+          "formDescription": "",
+          "buttonLabel": "Continuar"
+        }
+      },
+      "id": "b9982db1-89b4-51c1-a962-61770a1122e1",
+      "name": "Agente indisponível",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        3300,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a315260e-ade1-5a10-ad96-67395d52be37",
+              "leftValue": "={{ $json.decisao === 'Esperar 2 minutos e tentar de novo' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d3e7dfc8-5995-54dd-b65d-f41491a0736a",
+      "name": "Esperar o agente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3520,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 120,
+        "unit": "seconds"
+      },
+      "id": "fd1c83f8-626b-5995-82c9-89bb12f16cff",
+      "name": "Esperar o agente",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3740,
+        460
+      ],
+      "webhookId": "b97bb7fd-2629-5bb4-bb1a-a45ca259ab73"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { nome: $('Entrada atual').last().json.nome, ops: [] } }];\n"
+      },
+      "id": "833ef1c9-1bc2-5ce3-959b-a61f018756d7",
+      "name": "Pedir opções",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Erro ao adaptar a entrada",
+        "completionMessage": "={{ 'A ômica recusou a adaptação (' + $json.status + '): ' + JSON.stringify($json.corpo).slice(0, 500) }}"
+      },
+      "id": "0897dfc8-9e54-5850-8642-f91a92076663",
+      "name": "Fim: erro na adaptação",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        3300,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "67d53fa6-5f0b-5fa8-bcf3-571c5181bf7d",
+              "leftValue": "={{ $json.decisao === 'Aplicar este mapeamento' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "2579923a-85ba-56bd-b833-4b1c9dbed5ab",
+      "name": "Aplicar mapeamento?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3410,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/abortar' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "eb61cca7-40e1-5199-9568-7cb226897b06",
+      "name": "Cancelar run (arquivo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3630,
+        40
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Corrija o arquivo e envie de novo",
+        "completionMessage": "={{ 'Nada foi executado. O que corrigir em «' + $('Campos do mapeamento').last().json.nome + '»: ' + $('Campos do mapeamento').last().json.falhas.slice(0, 8).join(' | ') }}"
+      },
+      "id": "a2e13d42-ce0b-5de5-be49-87de1aaedbc0",
+      "name": "Fim: corrigir o arquivo",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        3850,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "da85df22-58f7-5abb-9293-3de3016fa406",
+      "name": "Ler run (escolhas)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        700
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const run = $input.first().json.body;\nconst rotulos = {\"classe_a\": \"Classe A (vem primeiro nas colunas da matriz)\", \"classe_b\": \"Classe B (diferente da A)\"};\nconst campos = Object.entries(rotulos).map(([nome, rotulo]) => ({\n  fieldLabel: rotulo, fieldName: nome, fieldType: 'dropdown', requiredField: true,\n  fieldOptions: { values: ((run.escolhas_opcoes[nome] || {}).valores || []).map((v) => ({ option: String(v) })) } }));\nreturn [{ json: { campos } }];\n"
+      },
+      "id": "a09415c8-5ddc-522a-867e-c6f1813c0d80",
+      "name": "Campos das escolhas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify($json.campos) }}",
+        "options": {
+          "formTitle": "Escolhas do autor",
+          "formDescription": "Só aparecem valores que existem nos seus arquivos. Os dois grupos têm de ser diferentes.",
+          "buttonLabel": "Continuar"
+        }
+      },
+      "id": "5951ac3d-833a-5758-b8e8-acfcb456cdfc",
+      "name": "Escolhas do autor",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2640,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const f = $input.first().json;\nconst nomes = [\"classe_a\", \"classe_b\"];\nreturn [{ json: { escolhas: Object.fromEntries(nomes.map((n) => [n, f[n]])) } }];\n"
+      },
+      "id": "abc11a83-532e-5cb4-b187-55c15d02333f",
+      "name": "Montar escolhas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/plano' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ escolhas: $json.escolhas }) }}"
+      },
+      "id": "7b20e81e-a640-57e7-a50e-083a5a67edba",
+      "name": "Propor plano",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        900
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]));\nconst MODULOS = [\"epigenomica\", \"genomica\", \"ml\", \"transcriptomica\"];\nconst marcaCombinante = (c) => ('a' + c + '\\u0334').normalize('NFD') !== 'a' + c + '\\u0334' ||\n  ('a\\u0301' + c).normalize('NFD') !== 'a\\u0301' + c;\nconst ESPACOS_DO_PYTHON = '[\\\\t\\\\n\\\\v\\\\f\\\\r\\\\x1c-\\\\x1f \\\\x85\\\\xa0\\\\u1680\\\\u2000-\\\\u200a\\\\u2028\\\\u2029\\\\u202f\\\\u205f\\\\u3000]+';\nconst aparar = (s) => s.replace(new RegExp('^' + ESPACOS_DO_PYTHON + '|' + ESPACOS_DO_PYTHON + '$', 'g'), '');\nconst normalizar = (s) => aparar(Array.from(s.normalize('NFKD')).filter((c) => !marcaCombinante(c)).join('')\n  .toLowerCase().replace(/\\u00df/g, 'ss'));\nconst avisosQueValem = (avisos, modulo) => {\n  const proprio = normalizar(String(modulo || ''));\n  return avisos.filter((a) => {\n    if (typeof a !== 'string' || aparar(a) === '') return false;\n    const prefixo = normalizar(a.split(':')[0]);\n    return prefixo === proprio || !MODULOS.includes(prefixo);\n  });\n};\n\nconst r = $input.first().json;\nif (r.statusCode !== 200) return [{ json: { rota: 'recusado', detalhe: JSON.stringify(r.body).slice(0, 600) } }];\nconst p = r.body;\n// D-10: o plano tem de ter voltado para o contexto escolhido no formulário. Sem especie e\n// subprojeto no corpo, o POST /runs cai no demo — aprovar isso rodaria no lugar errado.\nconst pedido = $('Conferir contexto').first().json;\nconst ctx = p.contexto || {};\nif (ctx.especie !== pedido.especie || ctx.subprojeto !== pedido.subprojeto) {\n  return [{ json: { rota: 'recusado', detalhe: 'O plano veio para o contexto ' + JSON.stringify(String(ctx.especie) + '/' + String(ctx.subprojeto)) +\n    ', não para o escolhido no formulário (' + JSON.stringify(pedido.especie + '/' + pedido.subprojeto) + '). Nada foi aprovado.' } }];\n}\n// só os avisos que valem para o módulo do plano: os mesmos que o relatório vai declarar\nconst avisos = avisosQueValem(Array.isArray(ctx.avisos) ? ctx.avisos : [], p.modulo);\nconst htmlCtx = '<p>Contexto: <b>' + esc(ctx.especie + '/' + ctx.subprojeto) + '</b> · assembly ' + esc(ctx.assembly) +\n  ' · sha ' + esc(String(ctx.sha256).slice(0, 12)) + '…</p>' +\n  (avisos.length ? '<h4>Avisos do subprojeto</h4><ul>' + avisos.map((a) => '<li>' + esc(a) + '</li>').join('') + '</ul>' : '');\n// Entrada por caminho: modo, índice e o ALCANCE do VCF. Os contigs vêm do veredito da entrada\n// (perfil do vcf_indexado, lido pelo índice), não do plano: um BCF do Run 8 tem um cromossomo\n// só, e o portão confere números, não alcance — o autor tem de ver isso ANTES de aprovar.\nconst vistas = $('Ler run (escolhas)').last().json.body.entradas || {};\nconst aviso = 'o dataset usa só a região ' + esc(((p.passos.find((x) => x.id === \"dataset\") || {}).valores || {}).regiao ?? '(ausente no plano)') + ' (parâmetro do subprojeto): um VCF sem esse contig dá 0 marcadores';\nconst extras = (n, e) => {\n  let s = '';\n  if (e.modo === 'referencia') s += ' — por referência, sem cópia';\n  const indices = Object.keys(e.irmaos || {});\n  if (indices.length) s += ' + índice ' + esc(indices.join(', '));\n  const perfil = ((vistas[n] || {}).veredito || {}).perfil || {};\n  if (Array.isArray(perfil.contigs_com_dados)) {\n    const lista = perfil.contigs_com_dados;\n    const total = Number(perfil.n_contigs_com_dados ?? lista.length);\n    s += '<br>contigs com variantes: <b>' + (lista.length ? esc(lista.join(', ')) : '(nenhum)') + '</b>' +\n      (total > lista.length ? ' (os ' + esc(lista.length) + ' primeiros de ' + esc(total) + ')' : '') +\n      ' — ' + aviso;\n  }\n  return s;\n};\nconst linhas = p.passos.map((x) => '<tr><td>' + esc(x.id) + '</td><td>' + esc(x.titulo) + '</td><td>' + esc(x.fila) +\n  '</td><td>' + esc(x.mem_gb) + ' GB</td><td>' + esc(x.tempo_estimado) + '</td></tr>').join('');\nconst ents = Object.entries(p.entradas).map(([n, e]) => '<li><b>' + esc(n) + '</b>: ' + esc(e.formato) + ', ' + esc(e.bytes) +\n  ' bytes, sha256 ' + esc(String(e.sha256).slice(0, 12)) + '…' + (e.adaptacao ? ' — adaptada (' + esc(e.adaptacao.modo) + ', ' +\n  esc(e.adaptacao.ops.length) + ' operações' + (e.adaptacao.modelo ? ', ' + esc(e.adaptacao.modelo) : '') + ')' : '') + extras(n, e) + '</li>').join('');\nconst escs = Object.entries(p.escolhas).map(([k, v]) => '<li>' + esc(k) + ' = <b>' + esc(v) + '</b></li>').join('') || '<li>(nenhuma)</li>';\nconst html = htmlCtx + '<p>Confira tudo antes de aprovar. Depois de aprovado, NADA muda: cada passo roda exatamente com isto.</p>' +\n  '<h4>Passos</h4><table><tr><th>passo</th><th>o quê</th><th>fila</th><th>RAM</th><th>tempo</th></tr>' + linhas + '</table>' +\n  '<p>Pico de RAM: <b>' + esc(p.recursos.pico_mem_gb) + ' GB</b></p><h4>Entradas</h4><ul>' + ents + '</ul><h4>Escolhas</h4><ul>' + escs + '</ul>' +\n  '<p><small>plano ' + esc(p.plano_sha256) + '</small></p>';\nconst campos = [{ fieldType: 'html', html }, { fieldLabel: 'Decisão', fieldName: 'decisao', fieldType: 'radio', requiredField: true,\n  fieldOptions: { values: [{ option: 'Aprovar e executar' }, { option: 'Cancelar' }] } }];\nreturn [{ json: { rota: 'aprovar', campos, plano_sha256: p.plano_sha256, passos: p.passos.map((x) => x.id) } }];\n"
+      },
+      "id": "2a38f1a0-47b5-567a-90ef-53eb5d95ee3a",
+      "name": "Resumo do plano",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "34132406-fb9d-5b25-9d49-efdd77646e53",
+              "leftValue": "={{ $json.rota === 'aprovar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "5f217138-5947-5726-82c4-a210a4881ca1",
+      "name": "Plano aceito?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3520,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Plano recusado pela ômica",
+        "completionMessage": "={{ $json.detalhe }}"
+      },
+      "id": "24093103-da1d-54ba-9416-7a312498d299",
+      "name": "Fim: plano recusado",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        3740,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify($json.campos) }}",
+        "options": {
+          "formTitle": "Aprovar o plano",
+          "formDescription": "",
+          "buttonLabel": "Confirmar"
+        }
+      },
+      "id": "24fd6492-f0fe-50c4-b326-8d451f9430a7",
+      "name": "Aprovação do plano",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        3740,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8dee994c-96f2-5ce6-bdb9-18db7fc869d1",
+              "leftValue": "={{ $json.decisao === 'Aprovar e executar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "80b8d377-c06f-5221-83cd-bac374fa6718",
+      "name": "Aprovado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3960,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/aprovar' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ plano_sha256: $('Resumo do plano').last().json.plano_sha256 }) }}"
+      },
+      "id": "78f1ff62-a5d6-5ff1-8244-03d38f5d4d1f",
+      "name": "Aprovar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        820
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/abortar' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "998c3f16-b19b-506b-9dae-25504bfe0027",
+      "name": "Cancelar run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        1020
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Run cancelado",
+        "completionMessage": "Nada foi executado."
+      },
+      "id": "1770e499-2442-57b2-bdf8-f5875533f828",
+      "name": "Fim: cancelado",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        4400,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1f3751a8-f05a-5a2a-9744-42c8ee375a5a",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a7bc8be1-f47c-5971-81ec-d8802caab21e",
+      "name": "Aprovação aceita?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4400,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Aprovação recusada",
+        "completionMessage": "={{ 'A ômica recusou aprovar: ' + JSON.stringify($json.body).slice(0, 500) }}"
+      },
+      "id": "3e4d2173-7057-546c-9f06-225918f3750d",
+      "name": "Fim: aprovação recusada",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        4620,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const passos = $('Resumo do plano').last().json.passos;\nconst i = $input.first().json._proximo_i ?? 0;\nreturn [{ json: { passos, i, passo: passos[i] ?? null, rota: i < passos.length ? 'executar' : 'fim', inicio: Date.now() } }];\n"
+      },
+      "id": "51183a64-0996-54cc-8181-ba910220d141",
+      "name": "Passo atual",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dfa36893-75fa-5a16-bf4b-b957f60fcaa7",
+              "leftValue": "={{ $json.rota === 'executar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "df97a41d-0cfa-581c-aac3-d58ab759ad94",
+      "name": "Falta executar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4840,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/passos/' + $('Passo atual').last().json.passo + '/executar' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "73332fc9-2764-5bc4-85b5-95dc21694dfa",
+      "name": "Executar passo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5060,
+        720
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst p = $('Passo atual').last().json;\nlet rota = 'falhou';\nif (r.statusCode === 202 || (r.statusCode === 409 && r.body?.detail?.erro === 'passo_ja_lancado')) rota = 'aguardar';\nelse if (r.statusCode === 429 || r.statusCode === 503) rota = (Date.now() - p.inicio) / 3.6e6 > 2 ? 'falhou' : 'esperar';\nreturn [{ json: { rota, status: r.statusCode, detalhe: JSON.stringify(r.body).slice(0, 600) } }];\n"
+      },
+      "id": "c2865550-d7e3-5288-86cf-6ce38c9a4d96",
+      "name": "Ler execução",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5280,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7c33a0d8-db2e-53d0-a4ef-34514d92f3c1",
+              "leftValue": "={{ $json.rota === 'aguardar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "bd0ce411-a125-5399-a407-9303a9ed1667",
+      "name": "Lançado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5500,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6ddaa182-887f-5253-b3ac-b8956b4980eb",
+              "leftValue": "={{ $json.rota === 'esperar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d2c4b631-b57b-581e-8f17-d4867f7be992",
+      "name": "RAM ou fila?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5500,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 120,
+        "unit": "seconds"
+      },
+      "id": "206b6825-284c-56d1-97f5-b92f8c80b995",
+      "name": "Esperar RAM/fila",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5720,
+        1000
+      ],
+      "webhookId": "fa26faba-0a2e-5463-a2a6-64b1d1bd78d6"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/passos/' + $('Passo atual').last().json.passo + '/aguardar?segundos=110' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 140000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "45788f90-b399-5c65-87d9-1caaf32aab73",
+      "name": "Aguardar passo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        620
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst p = $('Passo atual').last().json;\nif (r.statusCode !== 200) return [{ json: { rota: 'falhou', status: r.statusCode, detalhe: JSON.stringify(r.body).slice(0, 600) } }];\nconst env = r.body;\nif (['queued', 'running'].includes(env.estado)) {\n  const horas = (Date.now() - p.inicio) / 3.6e6;\n  return [{ json: { rota: horas > 12 ? 'falhou' : 'esperar', status: 200,\n    detalhe: horas > 12 ? 'o passo passou de 12 h sem terminar' : '' } }];\n}\nif (env.portao.ok) return [{ json: { rota: 'entregue', _proximo_i: p.i + 1 } }];\nreturn [{ json: { rota: 'falhou', status: 200, detalhe: (env.portao.falhas || []).join(' | ').slice(0, 600) } }];\n"
+      },
+      "id": "836ca7d4-7ded-56b7-8b02-a17dd6f40770",
+      "name": "Ler espera",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5940,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "511908bf-fca4-545c-938a-d146b124f3c9",
+              "leftValue": "={{ $json.rota === 'esperar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "7e87b712-68e0-569a-bf96-421bb52c3b54",
+      "name": "Ainda rodando?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6160,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5a23bc76-abc3-55bb-a540-dc6fce50e835",
+              "leftValue": "={{ $json.rota === 'entregue' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "38f96f18-b72e-5fba-ac43-7a6b634b124c",
+      "name": "Entregue?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6380,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]));\n\nconst e = $input.first().json;\nconst p = $('Passo atual').last().json;\nreturn [{ json: { campos: [\n  { fieldType: 'html', html: '<p>O passo <b>' + esc(p.passo) + '</b> não entregou (' + esc(e.status ?? '') + '):</p><pre>' + esc(e.detalhe) + '</pre>' +\n    '<p>O log do job está na ômica (' + esc('http://127.0.0.1:8710/jobs') + ').</p>' },\n  { fieldLabel: 'O que fazer', fieldName: 'decisao', fieldType: 'radio', requiredField: true,\n    fieldOptions: { values: [{ option: 'Repetir este passo' }, { option: 'Abortar o run' }] } }] } }];\n"
+      },
+      "id": "3b02db34-8769-593d-baaf-466bc88e043e",
+      "name": "Campos da falha",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6600,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify($json.campos) }}",
+        "options": {
+          "formTitle": "Um passo não entregou",
+          "formDescription": "",
+          "buttonLabel": "Continuar"
+        }
+      },
+      "id": "a45652dd-c589-5f6c-b343-aa432e6e3fbb",
+      "name": "Passo falhou",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        6820,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ef0ca0eb-7845-5153-b044-3a04c3fad01a",
+              "leftValue": "={{ $json.decisao === 'Repetir este passo' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f7304ad0-8d7a-5828-b826-2068c3c7bde6",
+      "name": "Repetir?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7040,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/abortar' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "cdc54282-b9a1-5ba7-9b9d-ebc5c8dfd78f",
+      "name": "Abortar run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7260,
+        1020
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Run abortado",
+        "completionMessage": "={{ 'Run ' + $('Criar run').first().json.body.run_id + ' abortado. O que já foi entregue continua em http://127.0.0.1:8710/jobs.' }}"
+      },
+      "id": "b34e8e74-7762-52fc-a24d-c0ac0854f315",
+      "name": "Fim: abortado",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        7480,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/relatorio/pedido' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "825e4fc4-07be-5d3f-88b1-3a881f4b149d",
+      "name": "Pedido de relatório",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5060,
+        1300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "47b06333-18d1-5b6f-82d4-dcff08ff760b",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "bf93140d-827d-5e4b-9812-dd80183a68b1",
+      "name": "Ficha pronta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5280,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Run concluído, relatório não gerado",
+        "completionMessage": "={{ 'Os passos terminaram, mas a ômica não montou a ficha de fatos: ' + JSON.stringify($json.body).slice(0, 500) }}"
+      },
+      "id": "b4254ec4-3401-5b34-9301-aabebb725470",
+      "name": "Fim: sem relatório",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        5500,
+        1500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $input.first().json.body;\nreturn [{ json: { esquema: p.esquema, body: {\n  model: \"claude-opus-5-5\", max_tokens: 16000, fallbacks: 'default',\n  output_config: { effort: 'high', format: { type: 'json_schema', schema: p.esquema } },\n  system: p.sistema, messages: [{ role: 'user', content: p.mensagem }] } } }];\n"
+      },
+      "id": "5c971669-5b2d-5bb1-93f2-db1caa84a6c4",
+      "name": "Montar chamada ao Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "anthropic-beta",
+              "value": "server-side-fallback-2026-07-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}"
+      },
+      "id": "007bf66a-6652-5066-9e84-31ae6ec76f33",
+      "name": "Claude (redator)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        1300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cmbUV99kDWwkyosz",
+          "name": "Anthropic x-api-key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode !== 200) return [{ json: { rota: 'erro_api', detalhe: JSON.stringify(r.body).slice(0, 600) } }];\nconst b = r.body;\n// stop_reason ANTES do conteúdo; só blocos de texto (thinking/fallback ficam de fora)\nconst texto = (b.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');\nlet rascunho = null;\ntry { rascunho = JSON.parse(texto); } catch (e) { rascunho = null; }\nreturn [{ json: { rota: 'entregar', rascunho, texto, modelo: b.model || '', stop_reason: b.stop_reason || '' } }];\n"
+      },
+      "id": "f46cffa6-6ac0-5387-92f7-0249a675abc5",
+      "name": "Ler resposta do Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5940,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a5263649-9aff-5c51-a575-e27c445c1597",
+              "leftValue": "={{ $json.rota === 'entregar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "cbac949d-53df-596d-8171-5e2d4cee6f1f",
+      "name": "Redator respondeu?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6160,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/relatorio/rascunho' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ rascunho: $json.rascunho, modelo: $json.modelo, stop_reason: $json.stop_reason }) }}"
+      },
+      "id": "a73c4f14-c070-56a1-9340-ba929acb827a",
+      "name": "Entregar rascunho",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6380,
+        1200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst b = r.body || {};\nlet rota = 'erro';\nif (r.statusCode === 200 && b.ok) rota = 'pronto';\nelse if (r.statusCode === 200 && b.restam_automaticas > 0) rota = 'corrigir';\nelse if (r.statusCode === 200 || b?.detail?.erro === 'tentativas_esgotadas') rota = 'autor';\nreturn [{ json: { rota, url: b.url, falhas: b.falhas || [], detalhe: JSON.stringify(b).slice(0, 600) } }];\n"
+      },
+      "id": "d6d09375-6b10-50f8-abef-36e97011c0b9",
+      "name": "Ler portão",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6600,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "78f8aebb-62bb-56b2-9c06-4637866eee6a",
+              "leftValue": "={{ $json.rota === 'pronto' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "ee04fcec-96af-5b10-b66f-35028ff4e486",
+      "name": "Relatório aprovado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6820,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Relatório pronto",
+        "completionMessage": "={{ 'Relatório conferido número a número: http://127.0.0.1:8710' + $json.url }}"
+      },
+      "id": "c7585364-297a-5578-98ea-517b457a4310",
+      "name": "Fim: relatório pronto",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        7040,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0aa9cc06-f2f2-5a1e-8d25-e1b113145551",
+              "leftValue": "={{ $json.rota === 'corrigir' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "b394e745-4c83-5c76-ba12-f0c1039d52b3",
+      "name": "Nova tentativa automática?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7040,
+        1400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const anterior = $('Pedir correção').isExecuted ? $('Pedir correção').last().json : $('Montar chamada ao Claude').last().json;\nconst resp = $('Ler resposta do Claude').last().json;\nconst falhas = $input.first().json.falhas;\nconst body = JSON.parse(JSON.stringify(anterior.body));\nbody.messages.push({ role: 'assistant', content: resp.texto || '(vazio)' });\nbody.messages.push({ role: 'user', content: 'O portão de números da ômica reprovou o rascunho. Falhas: ' + JSON.stringify(falhas) +\n  '. Devolva o JSON INTEIRO de novo corrigindo só isso; todo número continua só como {{f:id}}.' });\nreturn [{ json: { esquema: anterior.esquema, body } }];\n"
+      },
+      "id": "239d163c-0e43-5abe-b627-b5d33cdbf62f",
+      "name": "Pedir correção",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7260,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dc27e3bd-150f-5fba-85c7-2d5ce2899934",
+              "leftValue": "={{ $json.rota === 'autor' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "13e85c2d-1c28-530c-99dc-ff89e069706e",
+      "name": "Levar ao autor (relatório)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7260,
+        1500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]));\n\nconst e = $input.first().json;\nconst resp = $('Ler resposta do Claude').last().json;\nreturn [{ json: { campos: [\n  { fieldType: 'html', html: '<p>O portão reprovou o rascunho e as tentativas automáticas acabaram. Falhas:</p><ul>' +\n    (e.falhas || []).map((f) => '<li>' + esc(JSON.stringify(f)) + '</li>').join('') + '</ul>' +\n    '<p>Corrija o JSON abaixo (números só como {{f:id}}). Ele passa pelo MESMO portão.</p>' },\n  { fieldLabel: 'Rascunho (JSON)', fieldName: 'rascunho', fieldType: 'textarea', requiredField: true,\n    defaultValue: JSON.stringify(resp.rascunho ?? {}, null, 2) }] } }];\n"
+      },
+      "id": "411fdf3d-6c29-5440-a73c-027d2b448431",
+      "name": "Campos da revisão",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7480,
+        1500
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify($json.campos) }}",
+        "options": {
+          "formTitle": "Revisar o relatório",
+          "formDescription": "",
+          "buttonLabel": "Enviar ao portão"
+        }
+      },
+      "id": "035ad50b-8125-5d36-84a0-3b87d3655bf2",
+      "name": "Revisão do autor",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        7700,
+        1500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let rascunho = null;\ntry { rascunho = JSON.parse($input.first().json.rascunho); } catch (e) { rascunho = { erro: 'JSON inválido: ' + e.message }; }\nreturn [{ json: { rascunho } }];\n"
+      },
+      "id": "6b47996d-a99b-5dbf-be70-dea290bea4cc",
+      "name": "Ler revisão",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7920,
+        1500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://omica-web:8710/api/v1/runs/' + $('Criar run').first().json.body.run_id + '/relatorio/rascunho' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ rascunho: $json.rascunho, autor: true }) }}"
+      },
+      "id": "d95607ec-cda2-5b91-94e9-0c257171486b",
+      "name": "Entregar edição",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8140,
+        1500
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7VePH8cFDSRysYq9",
+          "name": "omica Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Erro no relatório",
+        "completionMessage": "={{ $json.detalhe }}"
+      },
+      "id": "a080deac-b278-5fea-b7ec-cd0740faaaf5",
+      "name": "Fim: erro no relatório",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        7480,
+        1700
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "json",
+        "jsonOutput": "={{ JSON.stringify([{ fieldType: 'html', html: '<p>A API da Anthropic não respondeu como esperado.</p>' }, { fieldLabel: 'O que fazer', fieldName: 'decisao', fieldType: 'radio', requiredField: true, fieldOptions: { values: [{ option: 'Tentar de novo' }, { option: 'Encerrar sem relatório' }] } }]) }}",
+        "options": {
+          "formTitle": "O redator não respondeu",
+          "formDescription": "",
+          "buttonLabel": "Continuar"
+        }
+      },
+      "id": "2576f898-88e9-5cf0-9d49-134d1ad2eb7e",
+      "name": "Redator indisponível",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        6380,
+        1500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3e73d85d-4139-531f-8365-4e46521e61da",
+              "leftValue": "={{ $json.decisao === 'Tentar de novo' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "ce5b5d13-c627-56f5-9cdd-4ab2bf9208dc",
+      "name": "Tentar o redator de novo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6600,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const anterior = $('Pedir correção').isExecuted ? $('Pedir correção').last().json : $('Montar chamada ao Claude').last().json;\nreturn [{ json: anterior }];\n"
+      },
+      "id": "0d2fa6ea-b955-5f33-8be6-b35f41e22caa",
+      "name": "Repetir chamada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6820,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Run concluído, sem relatório",
+        "completionMessage": "={{ 'Os resultados estão em http://127.0.0.1:8710/jobs; o relatório pode ser pedido de novo depois.' }}"
+      },
+      "id": "4a6dfa76-ad25-560e-8dd5-2aa9ecb505e1",
+      "name": "Fim: sem redator",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        6820,
+        1800
+      ]
+    }
+  ],
+  "connections": {
+    "Arquivos do experimento": {
+      "main": [
+        [
+          {
+            "node": "Contextos do pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contextos do pipeline": {
+      "main": [
+        [
+          {
+            "node": "Campos do contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campos do contexto": {
+      "main": [
+        [
+          {
+            "node": "Contexto do run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contexto do run": {
+      "main": [
+        [
+          {
+            "node": "Conferir contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir contexto": {
+      "main": [
+        [
+          {
+            "node": "Contexto válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contexto válido?": {
+      "main": [
+        [
+          {
+            "node": "Criar run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: contexto recusado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar run": {
+      "main": [
+        [
+          {
+            "node": "Separar arquivos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar arquivos": {
+      "main": [
+        [
+          {
+            "node": "Enviar entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar entrada": {
+      "main": [
+        [
+          {
+            "node": "Conferir envios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir envios": {
+      "main": [
+        [
+          {
+            "node": "Separar caminhos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar caminhos": {
+      "main": [
+        [
+          {
+            "node": "Enviar caminhos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar caminhos": {
+      "main": [
+        [
+          {
+            "node": "Conferir caminhos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir caminhos": {
+      "main": [
+        [
+          {
+            "node": "Caminhos aceitos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Caminhos aceitos?": {
+      "main": [
+        [
+          {
+            "node": "Ler run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cancelar run (caminho)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelar run (caminho)": {
+      "main": [
+        [
+          {
+            "node": "Fim: caminho recusado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler run": {
+      "main": [
+        [
+          {
+            "node": "Fila de adaptação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fila de adaptação": {
+      "main": [
+        [
+          {
+            "node": "Entradas válidas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entradas válidas?": {
+      "main": [
+        [
+          {
+            "node": "Entrada atual",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: entrada inválida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada atual": {
+      "main": [
+        [
+          {
+            "node": "Falta adaptar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falta adaptar?": {
+      "main": [
+        [
+          {
+            "node": "Adaptar (agente)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ler run (escolhas)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adaptar (agente)": {
+      "main": [
+        [
+          {
+            "node": "Ler adaptação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler adaptação": {
+      "main": [
+        [
+          {
+            "node": "Adaptou?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adaptou?": {
+      "main": [
+        [
+          {
+            "node": "Avançar entrada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Levar ao autor?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avançar entrada": {
+      "main": [
+        [
+          {
+            "node": "Entrada atual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Levar ao autor?": {
+      "main": [
+        [
+          {
+            "node": "Campos do mapeamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Agente indisponível?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campos do mapeamento": {
+      "main": [
+        [
+          {
+            "node": "Mapeamento pelo autor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mapeamento pelo autor": {
+      "main": [
+        [
+          {
+            "node": "Aplicar mapeamento?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar mapeamento?": {
+      "main": [
+        [
+          {
+            "node": "Ops do autor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cancelar run (arquivo)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelar run (arquivo)": {
+      "main": [
+        [
+          {
+            "node": "Fim: corrigir o arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ops do autor": {
+      "main": [
+        [
+          {
+            "node": "Adaptar (autor)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adaptar (autor)": {
+      "main": [
+        [
+          {
+            "node": "Ler adaptação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente indisponível?": {
+      "main": [
+        [
+          {
+            "node": "Agente indisponível",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: erro na adaptação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente indisponível": {
+      "main": [
+        [
+          {
+            "node": "Esperar o agente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar o agente?": {
+      "main": [
+        [
+          {
+            "node": "Esperar o agente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pedir opções",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar o agente": {
+      "main": [
+        [
+          {
+            "node": "Entrada atual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir opções": {
+      "main": [
+        [
+          {
+            "node": "Adaptar (autor)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler run (escolhas)": {
+      "main": [
+        [
+          {
+            "node": "Campos das escolhas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campos das escolhas": {
+      "main": [
+        [
+          {
+            "node": "Escolhas do autor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escolhas do autor": {
+      "main": [
+        [
+          {
+            "node": "Montar escolhas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar escolhas": {
+      "main": [
+        [
+          {
+            "node": "Propor plano",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Propor plano": {
+      "main": [
+        [
+          {
+            "node": "Resumo do plano",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plano aceito?": {
+      "main": [
+        [
+          {
+            "node": "Aprovação do plano",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: plano recusado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aprovação do plano": {
+      "main": [
+        [
+          {
+            "node": "Aprovado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aprovado?": {
+      "main": [
+        [
+          {
+            "node": "Aprovar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cancelar run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelar run": {
+      "main": [
+        [
+          {
+            "node": "Fim: cancelado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aprovar": {
+      "main": [
+        [
+          {
+            "node": "Aprovação aceita?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aprovação aceita?": {
+      "main": [
+        [
+          {
+            "node": "Passo atual",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: aprovação recusada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumo do plano": {
+      "main": [
+        [
+          {
+            "node": "Plano aceito?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passo atual": {
+      "main": [
+        [
+          {
+            "node": "Falta executar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falta executar?": {
+      "main": [
+        [
+          {
+            "node": "Executar passo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pedido de relatório",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar passo": {
+      "main": [
+        [
+          {
+            "node": "Ler execução",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler execução": {
+      "main": [
+        [
+          {
+            "node": "Lançado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lançado?": {
+      "main": [
+        [
+          {
+            "node": "Aguardar passo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RAM ou fila?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAM ou fila?": {
+      "main": [
+        [
+          {
+            "node": "Esperar RAM/fila",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Campos da falha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar RAM/fila": {
+      "main": [
+        [
+          {
+            "node": "Executar passo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar passo": {
+      "main": [
+        [
+          {
+            "node": "Ler espera",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler espera": {
+      "main": [
+        [
+          {
+            "node": "Ainda rodando?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ainda rodando?": {
+      "main": [
+        [
+          {
+            "node": "Aguardar passo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Entregue?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entregue?": {
+      "main": [
+        [
+          {
+            "node": "Passo atual",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Campos da falha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campos da falha": {
+      "main": [
+        [
+          {
+            "node": "Passo falhou",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passo falhou": {
+      "main": [
+        [
+          {
+            "node": "Repetir?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repetir?": {
+      "main": [
+        [
+          {
+            "node": "Executar passo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Abortar run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abortar run": {
+      "main": [
+        [
+          {
+            "node": "Fim: abortado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedido de relatório": {
+      "main": [
+        [
+          {
+            "node": "Ficha pronta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ficha pronta?": {
+      "main": [
+        [
+          {
+            "node": "Montar chamada ao Claude",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: sem relatório",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar chamada ao Claude": {
+      "main": [
+        [
+          {
+            "node": "Claude (redator)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude (redator)": {
+      "main": [
+        [
+          {
+            "node": "Ler resposta do Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler resposta do Claude": {
+      "main": [
+        [
+          {
+            "node": "Redator respondeu?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redator respondeu?": {
+      "main": [
+        [
+          {
+            "node": "Entregar rascunho",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redator indisponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redator indisponível": {
+      "main": [
+        [
+          {
+            "node": "Tentar o redator de novo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tentar o redator de novo?": {
+      "main": [
+        [
+          {
+            "node": "Repetir chamada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: sem redator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repetir chamada": {
+      "main": [
+        [
+          {
+            "node": "Claude (redator)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entregar rascunho": {
+      "main": [
+        [
+          {
+            "node": "Ler portão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler portão": {
+      "main": [
+        [
+          {
+            "node": "Relatório aprovado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Relatório aprovado?": {
+      "main": [
+        [
+          {
+            "node": "Fim: relatório pronto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nova tentativa automática?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nova tentativa automática?": {
+      "main": [
+        [
+          {
+            "node": "Pedir correção",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Levar ao autor (relatório)?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir correção": {
+      "main": [
+        [
+          {
+            "node": "Claude (redator)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Levar ao autor (relatório)?": {
+      "main": [
+        [
+          {
+            "node": "Campos da revisão",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim: erro no relatório",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campos da revisão": {
+      "main": [
+        [
+          {
+            "node": "Revisão do autor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revisão do autor": {
+      "main": [
+        [
+          {
+            "node": "Ler revisão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler revisão": {
+      "main": [
+        [
+          {
+            "node": "Entregar edição",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entregar edição": {
+      "main": [
+        [
+          {
+            "node": "Ler portão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "gerado_por": "omica/n8n/build_workflows.py",
+    "pipeline": "ml_aims_vcf"
+  },
+  "tags": []
+}
