@@ -41,6 +41,7 @@ CHAVES_PARAM_V1 = {"name", "rotulo", "default", "tipo"}
 CHAVES_WORKFLOW_V1 = {"id", "titulo", "passos", "testado_em", "selo_vigente"}
 CHAVES_PIPELINES_V1 = {"pipelines", "erros"}
 CHAVES_PIPELINE_V1 = {"id", "modulo", "titulo", "descricao", "entradas", "escolhas", "passos", "selo"}
+CHAVES_ESCOLHA_V1 = {"rotulo", "valores_de"}
 CHAVES_ESPECIE = {"id", "nome_cientifico", "nome_exibido", "nome_exibido_en", "taxon_ids", "ordem",
                   "assembly_padrao", "assemblies", "modulos", "estado", "refs_presentes", "refs_total",
                   "n_subprojetos", "n_executaveis"}
@@ -66,6 +67,15 @@ def _detalhe(r) -> dict:
 def _rascunho(especie: str = "homo_sapiens", slug: str = "teste_rna", **kw) -> Path:
     kw.setdefault("assembly", "GRCh38" if especie == "homo_sapiens" else "ARS-UCD1.3")
     return escrever_subprojeto(get_config().projetos_dir, especie, slug, **kw)
+
+
+def _pipelines_do_yaml_do_demo() -> list[str]:
+    import yaml
+
+    from omica.config import REPO_ROOT
+
+    dados = yaml.safe_load((REPO_ROOT / "projetos" / "bos_taurus" / "demo" / "subprojeto.yaml").read_text(encoding="utf-8"))
+    return list(dados["pipelines"])
 
 
 def _refs_bovinas_no_disco(quais=None) -> None:
@@ -104,9 +114,21 @@ def test_catalogo_sem_query_tem_as_chaves_da_v1(api):
 def test_pipelines_sem_query_tem_as_chaves_da_v1(api):
     corpo = api.get("/api/v1/pipelines").json()
     assert set(corpo) == CHAVES_PIPELINES_V1 and corpo["erros"] == {}
-    assert {p["id"] for p in corpo["pipelines"]} == {"transcriptomica_de", "genomica_painel", "genomica_regioes"}
+    # B1 (F6): a lista é a do catálogo, não fixa — os pipelines novos entram sem editar o teste
+    assert {p["id"] for p in corpo["pipelines"]} == set(carregar_pipelines()[0])
+    assert {"transcriptomica_de", "genomica_painel", "genomica_regioes"} <= {p["id"] for p in corpo["pipelines"]}
     for p in corpo["pipelines"]:
         assert set(p) == CHAVES_PIPELINE_V1, p["id"]
+        # X1′ (F6): as escolhas sem query saem com as chaves da v1 (sem `diferente_de`)
+        for n, e in p["escolhas"].items():
+            assert set(e) == CHAVES_ESCOLHA_V1, (p["id"], n, e)
+    assert any(p["escolhas"] for p in corpo["pipelines"])  # o teste não passa no vazio
+
+
+def test_x1_escolhas_com_query_trazem_diferente_de(api):
+    corpo = api.get("/api/v1/pipelines", params={"especie": "bos_taurus", "subprojeto": "demo"}).json()
+    escolhas = [e for p in corpo["pipelines"] for e in p["escolhas"].values()]
+    assert escolhas and all(set(e) == CHAVES_ESCOLHA_V1 | {"diferente_de"} for e in escolhas)
 
 
 def test_sem_query_nem_carrega_o_catalogo_de_especies(api, monkeypatch):
@@ -275,7 +297,8 @@ def test_pipelines_aula_e_demo(api):
     assert [p["id"] for p in aula["pipelines"]] == ["transcriptomica_de"]
     assert aula["contexto"]["execucao"] == "so_pipelines"
     demo = api.get("/api/v1/pipelines", params={"especie": "bos_taurus", "subprojeto": "demo"}).json()
-    assert [p["id"] for p in demo["pipelines"]] == ["transcriptomica_de", "genomica_painel", "genomica_regioes"]
+    # B1 (F6): a lista do demo é o `pipelines:` do próprio subprojeto.yaml (a F5 o edita uma vez)
+    assert [p["id"] for p in demo["pipelines"]] == _pipelines_do_yaml_do_demo()
 
 
 def test_pipelines_listados_sao_os_que_o_run_aceita(api):
@@ -642,3 +665,106 @@ def test_saude_nao_cai_se_o_catalogo_falhar(api, monkeypatch):
     r = api.get("/api/v1/saude")
     assert r.status_code == 200
     assert list(r.json()["erros_especies"]) == ["_catalogo"] and r.json()["erros_subprojetos"] == {}
+
+
+# ====================================================== /subprojetos?pipeline= (F6, X8, D-10)
+def _ids(r) -> list[str]:
+    assert r.status_code == 200, r.text
+    return [s["id"] for s in r.json()["subprojetos"]]
+
+
+def test_x8_listados_para_o_pipeline_sao_os_que_o_post_aceita(api, monkeypatch):
+    """Paridade com o POST /runs, a MESMA função (contexto.execucao_permitida): para todo
+    pipeline P e cada subprojeto S de {demo, aula, um rascunho bovino, um humano},
+    S ∈ GET /subprojetos?pipeline=P ⇔ POST /runs {P, S} dá 201."""
+    monkeypatch.setenv("OMICA_MAX_RUNS_ABERTOS", "1000")  # um run por par (P, S) aceito
+    _rascunho()
+    _rascunho("bos_taurus", "so_rna", modulos=["transcriptomica"])
+    alvos = [("bos_taurus", "demo"), AULA, ("bos_taurus", "so_rna"), ("homo_sapiens", "teste_rna")]
+    recusados = 0
+    for pid in carregar_pipelines()[0]:
+        listados = set(_ids(api.get("/api/v1/subprojetos", params={"pipeline": pid})))
+        for esp, slug in alvos:
+            r = api.post("/api/v1/runs", json={"pipeline": pid, "especie": esp, "subprojeto": slug})
+            assert (f"{esp}/{slug}" in listados) == (r.status_code == 201), (pid, esp, slug, r.text)
+            recusados += r.status_code != 201
+    assert recusados  # o filtro não passa no vazio: a aula e o humano recusam a genômica
+    # a ordem é a de /subprojetos sem filtro (espécies na ordem; em cada uma, o demo primeiro)
+    todos = _ids(api.get("/api/v1/subprojetos"))
+    do_rna = _ids(api.get("/api/v1/subprojetos", params={"pipeline": "transcriptomica_de"}))
+    assert do_rna == [s for s in todos if s in do_rna]
+    assert _ids(api.get("/api/v1/subprojetos", params={"pipeline": "transcriptomica_de",
+                                                       "especie": "bos_taurus"}))[0] == "bos_taurus/demo"
+
+
+def test_x8_genomica_so_no_demo(api):
+    _rascunho()
+    assert _ids(api.get("/api/v1/subprojetos", params={"pipeline": "genomica_regioes"})) == ["bos_taurus/demo"]
+
+
+@pytest.mark.parametrize("pipeline", ["nao_existe", "../x", "Transcriptomica_de", "transcriptomica_de\n"])
+def test_x8_pipeline_inexistente_e_404(api, pipeline):
+    r = api.get("/api/v1/subprojetos", params={"pipeline": pipeline})
+    assert r.status_code == 404 and _detalhe(r)["erro"] == "pipeline_inexistente", r.text
+
+
+def test_x8_privados_false_tira_os_privados(api):
+    _rascunho("bos_taurus", "segredo", modulos=["transcriptomica"], privado=True)
+    com = _ids(api.get("/api/v1/subprojetos", params={"pipeline": "transcriptomica_de"}))
+    sem = _ids(api.get("/api/v1/subprojetos", params={"pipeline": "transcriptomica_de", "privados": "false"}))
+    assert "bos_taurus/segredo" in com and "bos_taurus/segredo" not in sem
+    assert set(com) - set(sem) == {"bos_taurus/segredo"}
+    # sem pipeline, o filtro de privados vale igual; o padrão (true) é a resposta de hoje
+    assert "bos_taurus/segredo" in _ids(api.get("/api/v1/subprojetos"))
+    assert "bos_taurus/segredo" not in _ids(api.get("/api/v1/subprojetos", params={"privados": "false"}))
+
+
+def test_x8_privados_false_nao_devolve_erro_de_carga_de_dados(api, monkeypatch, tmp_path):
+    """Verificação F6: o GET com privados=false é o que o n8n chama e grava no registro de
+    execução. O erro de carga de um subprojeto de <dados> traz o slug na chave e, na mensagem do
+    pydantic, o input_value (título, campo a mais) — e um subprojeto que não carrega pode ser
+    privado. Canário: dois privados quebrados em <dados> (campo extra; título > TITULO_MAX), com
+    e sem pipeline e por espécie; nada deles sai em privados=false. Controles: com privados=true
+    o detalhe fica, e o erro do repositório (público) sobrevive ao filtro."""
+    from omica import especies
+    from omica.subprojetos import TITULO_MAX
+
+    repo = tmp_path / "projetos_teste"
+    escrever_subprojeto(repo, "homo_sapiens", "sub07")  # erro do repositório (slug nu)
+    apontar_catalogo(monkeypatch, especies.ESPECIES_DIR, repo)
+    _rascunho("bos_taurus", "segredo_extra", modulos=["transcriptomica"], privado=True,
+              campo_a_mais="VALOR SIGILOSO DO CAMPO")
+    _rascunho("bos_taurus", "segredo_titulo", modulos=["transcriptomica"], privado=True,
+              titulo="TITULO SIGILOSO " + "x" * TITULO_MAX)
+    sigilos = ("segredo_extra", "segredo_titulo", "VALOR SIGILOSO", "TITULO SIGILOSO")
+    for params in ({"pipeline": "transcriptomica_de"}, {}, {"especie": "bos_taurus"},
+                   {"pipeline": "transcriptomica_de", "especie": "bos_taurus"}):
+        com = api.get("/api/v1/subprojetos", params=params)
+        sem = api.get("/api/v1/subprojetos", params={**params, "privados": "false"})
+        assert com.status_code == 200 and sem.status_code == 200, (params, com.text, sem.text)
+        for s in sigilos:  # controle: o token é do autor, o detalhe fica
+            assert s in com.text, (params, s, com.json()["erros"])
+        vazou = [s for s in sigilos if s in sem.text]
+        assert not vazou, f"privados=false vazou {vazou} em {params}: {sem.json()['erros']}"
+        esperado = set() if "especie" in params else {"repo:homo_sapiens/sub07"}
+        assert set(sem.json()["erros"]) == esperado, (params, sem.json()["erros"])
+
+
+def test_x8_privados_false_falha_fechada_em_origem_desconhecida(api, monkeypatch):
+    """O filtro é "só repo:*", não "tudo menos dados:*": um rótulo de origem que o loader venha
+    a ganhar não sai em privados=false até alguém decidir que ele é público."""
+    import dataclasses
+
+    original = contexto.catalogo
+
+    def com_erro_novo():
+        cat = original()
+        return dataclasses.replace(cat, erros_subprojetos={**cat.erros_subprojetos,
+                                                           "outra:bos_taurus/desconhecido": "ORIGEM NOVA"})
+
+    monkeypatch.setattr(contexto, "catalogo", com_erro_novo)
+    com = api.get("/api/v1/subprojetos", params={"pipeline": "transcriptomica_de"})
+    sem = api.get("/api/v1/subprojetos", params={"pipeline": "transcriptomica_de", "privados": "false"})
+    assert "outra:bos_taurus/desconhecido" in com.json()["erros"], com.text  # controle
+    assert "outra:bos_taurus/desconhecido" not in sem.json()["erros"], \
+        f"privados=false deixou passar origem desconhecida: {sem.json()['erros']}"

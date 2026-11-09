@@ -71,6 +71,9 @@ _PSlug = Annotated[str, ParamDeCaminho(pattern=_PADRAO_SLUG)]
 # v1 (crítica v2, médio 4): um campo novo do ParamSpec (o `escopo` da v2) vazava pelo
 # model_dump() — congelar a lista, e não excluir o campo novo, cobre também o próximo.
 _CAMPOS_PARAM_V1 = frozenset({"name", "rotulo", "default", "tipo"})
+# Idem para as escolhas do /pipelines sem query (F6, adendo §A4 X1′): o `diferente_de` novo
+# sairia como `null` em todo pipeline da v1.
+_CAMPOS_ESCOLHA_V1 = frozenset({"rotulo", "valores_de"})
 # teto de stat por lista de caminhos declarados num subprojeto (o mesmo da página, ESPEC §7)
 _MAX_PRESENCA = 50
 
@@ -349,6 +352,10 @@ def _presente(valor: str) -> Optional[bool]:
         return None
 
 
+# rótulo de erro dos loaders v2 para o que vem do repositório (o par de saude.ORIGEM_DADOS)
+_ORIGEM_REPO = "repo:"
+
+
 def _erros_da_especie(erros: dict[str, str], especie: str) -> dict[str, str]:
     """Os erros de carga cujo rótulo ("<origem>:<esp>/<slug>" ou "<origem>:<esp>") é da espécie."""
     return {k: v for k, v in erros.items() if k.partition(":")[2].split("/", 1)[0] == especie}
@@ -407,17 +414,44 @@ def _presencas(caminhos: Iterable[str]) -> list[Optional[bool]]:
 
 
 @router.get("/subprojetos")
-def subprojetos(especie: _QEspecie = None, arquivados: bool = False) -> dict[str, Any]:
+def subprojetos(especie: _QEspecie = None, arquivados: bool = False,
+                pipeline: Optional[str] = Query(default=None, max_length=200),
+                privados: bool = True) -> dict[str, Any]:
     """Os subprojetos (da espécie, se pedida), o demo primeiro e depois por título; os
-    arquivados só com `?arquivados=true`. `erros`: subprojetos que não carregaram."""
+    arquivados só com `?arquivados=true`. `erros`: subprojetos que não carregaram.
+
+    F6 (D-10, adendo §A4 X8) — o formulário do n8n escolhe o contexto do run daqui:
+    - `?pipeline=<id>`: só os subprojetos em que o POST /runs desse pipeline é aceito — a
+      MESMA função do POST (`contexto.execucao_permitida`), sem regra duplicada; pipeline
+      inexistente (ou com contrato quebrado) é 404 `pipeline_inexistente`;
+    - `?privados=false`: sem os subprojetos `privado: true` (o builder do n8n manda sempre;
+      o padrão é true porque o token é do autor) e, em `erros`, só os do repositório."""
     cat = contexto.catalogo()
     if especie is not None and especie not in cat.especies:
         raise _especie_inexistente(cat, especie)
+    p = None
+    if pipeline is not None:
+        validos, erros_p = carregar_pipelines()
+        p = validos.get(pipeline)
+        if p is None:
+            raise HTTPException(404, detail={"erro": "pipeline_inexistente", "pipeline": pipeline[:80],
+                                             "erro_de_contrato": erros_p.get(f"{pipeline}.yaml")})
     alvo = [cat.especies[especie]] if especie is not None else contexto.listar_especies(cat)
-    itens = [_item_subprojeto(r) for e in alvo
-             for r in contexto.listar_subprojetos(e.id, incluir_arquivados=arquivados, cat=cat)]
+    regs = [r for e in alvo for r in contexto.listar_subprojetos(e.id, incluir_arquivados=arquivados, cat=cat)]
+    if p is not None:
+        regs = [r for r in regs
+                if contexto.execucao_permitida(r.sub.especie, r.sub.slug, "pipeline", pipeline=p, cat=cat)[0]]
+    if not privados:
+        regs = [r for r in regs if not r.sub.privado]
     erros = dict(cat.erros_subprojetos) if especie is None else _erros_da_especie(cat.erros_subprojetos, especie)
-    return {"subprojetos": itens, "erros": erros}
+    if not privados:
+        # F6 (verificação): o n8n grava esta resposta no registro de execução, e o erro de carga
+        # de um subprojeto de <dados> traz o slug na chave e, na mensagem do pydantic, o
+        # input_value (título, pergunta). Um subprojeto que não carrega pode ser privado — não
+        # há como saber —, então a falha é fechada: só os "repo:*" (o repositório não aceita
+        # privado, regra 7). O n8n não usa `erros`; com privados=true o detalhe fica.
+        erros = {k: v for k, v in erros.items() if k.startswith(_ORIGEM_REPO)}
+    return {"subprojetos": [_item_subprojeto(r) for r in regs], "erros": erros}
 
 
 @router.get("/subprojetos/{especie}/{slug}")
@@ -564,7 +598,8 @@ def pipelines(especie: _QEspecie = None, subprojeto: _QSubprojeto = None) -> dic
         item = {"id": p.id, "modulo": p.modulo, "titulo": p.titulo, "descricao": p.descricao,
                 "entradas": {n: {**e.model_dump(), "envio": envio_formulario(e)}
                              for n, e in p.entradas.items()},
-                "escolhas": {n: e.model_dump() for n, e in p.escolhas_autor.items()},
+                "escolhas": {n: (e.model_dump() if f is not None else e.model_dump(include=_CAMPOS_ESCOLHA_V1))
+                             for n, e in p.escolhas_autor.items()},
                 "passos": [x.id for x in p.passos], "selo": p.selo_pipeline.model_dump()}
         if f is not None:
             item["especies"] = list(p.especies)

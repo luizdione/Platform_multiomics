@@ -954,3 +954,57 @@ def test_privado_que_nao_carrega_continua_oculto(cfg, caso):
     rel = c.get(f"/relatorios/{rid}/", follow_redirects=False)
     assert det.status_code == 303 and sse.status_code == 404 and rel.status_code == 303
     assert "SEGREDO" not in sse.text and "SIGILOSO" not in rel.text and "segredo_lab" not in lista
+
+
+# ---------------------------------------- X9 (F6, crítica M13): /resultados sem a cópia bruta
+_RUN_EPI = "epigenomica_dmc-20261029-150000-abcdef"
+
+
+def _arvore_epi(cfg, base_rel: str):
+    base = cfg.results_dir / base_rel / "runs" / _RUN_EPI
+    (base / "montar" / "coverages").mkdir(parents=True)
+    (base / "montar" / "coverages" / "HF__FILTERED_H82_HF_ERS4410317_CD4.bismark.cov.gz").write_bytes(b"\x1f\x8bdados")
+    (base / "montar" / "coverages" / "notas.txt").write_text("fora da regra, mas dentro da porta de pasta")
+    (base / "montar" / "montar_resumo.json").write_text("{}", encoding="utf-8")
+    (base / "tss").mkdir()
+    (base / "tss" / "tss_perfil.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (base / "dmc").mkdir()
+    (base / "dmc" / "solto.cov").write_text("1\t1\t1\t100\t1\t0\n", encoding="utf-8")
+    (base / "dmc" / "solto.COV.GZ").write_bytes(b"\x1f\x8b")
+    return base
+
+
+@pytest.mark.parametrize("base_rel", ["epigenomica", "projetos/bos_taurus/x_epi/epigenomica"])
+def test_x9_resultados_nao_serve_copia_bruta(cfg, base_rel):
+    escrever_subprojeto(cfg.projetos_dir, "bos_taurus", "x_epi", assembly="ARS-UCD1.3", modulos=["epigenomica"])
+    _arvore_epi(cfg, base_rel)
+    pre = f"/resultados/{base_rel}/runs/{_RUN_EPI}"
+    casos = [("montar/coverages/HF__FILTERED_H82_HF_ERS4410317_CD4.bismark.cov.gz", 303),  # canário (E2E-4 m)
+             ("montar/coverages/notas.txt", 303),     # dentro da porta de pasta, qualquer nome
+             ("dmc/solto.cov", 303), ("dmc/solto.COV.GZ", 303),  # coverage solto, qualquer caixa
+             ("tss/tss_perfil.png", 200), ("montar/montar_resumo.json", 200)]  # controles
+    for rel, codigo in casos:
+        r = _c().get(f"{pre}/{rel}", follow_redirects=False)
+        assert r.status_code == codigo, (rel, r.status_code)
+        if codigo == 303:
+            assert r.headers["location"] == "/"
+
+
+def test_x9_figuras_do_relatorio_continuam_servidas(cfg):
+    """Controle: toda figura que o relatorio.html referencia (figuras/<nome>, relativa à página
+    /relatorios/<run>/) é servida."""
+    base = _arvore_epi(cfg, "epigenomica")
+    pasta = cfg.work_dir / "runs" / _RUN_EPI
+    pasta.mkdir(parents=True)
+    (pasta / "run.json").write_text(json.dumps({"run_id": _RUN_EPI, "pipeline": "epigenomica_dmc",
+                                                "modulo": "epigenomica"}), encoding="utf-8")
+    (base / "relatorio" / "figuras").mkdir(parents=True)
+    (base / "relatorio" / "figuras" / "tss_perfil.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (base / "relatorio" / "relatorio.html").write_text(
+        '<figure><img src="figuras/tss_perfil.png" alt="tss.tss_png"></figure>', encoding="utf-8")
+    pagina = _c().get(f"/relatorios/{_RUN_EPI}/")
+    assert pagina.status_code == 200
+    figuras = re.findall(r'src="(figuras/[^"]+)"', pagina.text)
+    assert figuras
+    for f in figuras:
+        assert _c().get(f"/relatorios/{_RUN_EPI}/{f}", follow_redirects=False).status_code == 200, f

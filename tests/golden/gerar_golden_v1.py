@@ -18,7 +18,8 @@ Receita (fixa — o teste reproduz exatamente estas condições):
 
 Uso (da raiz do repositório):
   python tests/golden/gerar_golden_v1.py            # grava o JSON
-  python tests/golden/gerar_golden_v1.py --conferir # só compara com o JSON gravado (exit 1 se divergir)
+  python tests/golden/gerar_golden_v1.py --conferir # compara as chaves GRAVADAS (exit 1 se alguma divergir
+                                                    # ou sumir); spec nova sai listada "fora do I2", exit 0
 """
 from __future__ import annotations
 
@@ -86,12 +87,18 @@ def main(argv: list[str]) -> int:
         _isolar_ambiente(tmp)
         golden = gerar()
     if "--conferir" in argv:
+        # L12 (F6): compara SÓ as chaves gravadas — a régua é o cmd da v1. Spec acrescentada
+        # depois da v1 (os scripts_api da F6) não tem linha de base: é listada como "fora do
+        # I2", sem reprovar. Chave gravada que sumiu ou mudou reprova (saída 1).
         gravado = json.loads(SAIDA_JSON.read_text(encoding="utf-8"))
-        if gravado != golden:
-            difs = sorted(k for k in set(gravado) | set(golden) if gravado.get(k) != golden.get(k))
+        difs = sorted(k for k in gravado if golden.get(k) != gravado[k])
+        novas = sorted(set(golden) - set(gravado))
+        if novas:
+            print(f"fora do I2 (spec depois da v1), {len(novas)}: {novas}")
+        if difs:
             print(f"golden DIVERGE em {len(difs)} entrada(s): {difs}")
             return 1
-        print(f"golden confere: {len(golden)} entradas")
+        print(f"golden confere: {len(gravado)} entradas gravadas")
         return 0
     SAIDA_JSON.write_text(json.dumps(golden, ensure_ascii=False, indent=1) + "\n",
                           encoding="utf-8", newline="\n")

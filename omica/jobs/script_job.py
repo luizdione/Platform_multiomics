@@ -23,7 +23,11 @@ Contrato com os scripts:
 A receita da atestação das entradas (impressão, sha com teto, `atestar_entradas`,
 `divergencias`) mora AQUI e é a mesma que o web usa (omica/runs.py importa daqui): os dois
 lados comparam números tirados pela mesma função, como na proveniência do código. Só stdlib
-e Python 3.10 — o omica-vep (jammy) importa este módulo.
+e Python 3.10 — o omica-vep (jammy) importa este módulo (e o omica/contrato/diretorio.py).
+
+PASTA (F6, ESPEC §1.A.6-§1.A.7): a entrada e a porta de pasta são atestadas pelo sha da
+ÁRVORE dos membros (`diretorio.sha_diretorio`, com a regra do plano), a mesma função do
+envelope; a entrada ecoa `tipo` e `regra`, e uma regra diferente da do plano é "outro arquivo".
 """
 from __future__ import annotations
 
@@ -36,6 +40,7 @@ from typing import Any, Optional
 
 from omica import proveniencia
 from omica.config import REPO_ROOT
+from omica.contrato import diretorio
 from omica.jobs.queue import append_log, read_status, write_status
 
 PREFIXO_RESULTADO = "RESULTADO:"
@@ -100,6 +105,18 @@ def _sha_ou_none(p: Path, limite: int) -> Optional[str]:
         return None
 
 
+def _arvore_ou_none(p: Path, regra: Any, limite: int) -> tuple[Optional[str], Optional[int]]:
+    """(sha da árvore, bytes somados) de uma pasta, ou (None, None): regra que não é dict,
+    membro recusado (diretorio.ErroMembros) ou pasta ilegível. Acima do teto, o sha é None."""
+    if not isinstance(regra, dict):
+        return None, None
+    try:
+        arv = diretorio.sha_diretorio(p, regra, limite)
+    except (diretorio.ErroMembros, OSError):
+        return None, None
+    return arv["sha256"], arv["bytes"]
+
+
 def atestar_entradas(espec: dict[str, Any], *, completo: bool) -> dict[str, Any]:
     """O que o job vai ler (`completo=False`, antes do Popen) ou leu (`completo=True`, depois
     do rc 0), por entrada. `espec[n]` = {"caminho", "modo", "bytes", "sha256", "impressao"?,
@@ -121,6 +138,14 @@ def atestar_entradas(espec: dict[str, Any], *, completo: bool) -> dict[str, Any]
         candidatos = [str(s) for s in (e.get("candidatos_irmaos") or [])]
         p = _no_repo(caminho)
         r: dict[str, Any] = {"caminho": caminho, "modo": modo, "candidatos_irmaos": candidatos}
+        if e.get("tipo") == "diretorio":
+            # F6: pasta — ecoa tipo e regra; no início e no fim, o sha da árvore e os bytes
+            # (a cópia tem no máximo 256 MiB: o sha completo é barato); sem índice irmão
+            r["tipo"], r["regra"] = "diretorio", e.get("regra")
+            r["sha256"], r["bytes"] = _arvore_ou_none(p, e.get("regra"), _MAX_SHA_ENTRADA)
+            r["irmaos"] = {}
+            saida[str(nome)] = r
+            continue
         if completo:
             r["sha256"] = _sha_ou_none(p, _MAX_SHA_ENTRADA)
         elif modo == "referencia":
@@ -151,7 +176,9 @@ def divergencias(esperado: dict[str, Any], lido: Any, *, completo: bool) -> set[
     tags: set[str] = set()
     modo = esperado.get("modo") or "copia"
     if (lido.get("caminho") != esperado.get("caminho") or (lido.get("modo") or "copia") != modo
-            or list(lido.get("candidatos_irmaos") or []) != list(esperado.get("candidatos_irmaos") or [])):
+            or list(lido.get("candidatos_irmaos") or []) != list(esperado.get("candidatos_irmaos") or [])
+            # F6: pasta lida com outra regra (ou como arquivo) é outra entrada
+            or lido.get("tipo") != esperado.get("tipo") or lido.get("regra") != esperado.get("regra")):
         tags.add("caminho")
     if completo or modo != "referencia":
         sha = lido.get("sha256")
@@ -186,12 +213,20 @@ def _sha256(caminho: Path) -> Optional[str]:
     return h.hexdigest()
 
 
+def _sha_porta(valor: Any) -> Optional[str]:
+    if isinstance(valor, dict):
+        # F6: porta de PASTA, {"caminho", "regra"} — o sha da árvore, a receita do envelope
+        return _arvore_ou_none(_no_repo(str(valor.get("caminho") or "")), valor.get("regra"), _MAX_SHA_SAIDA)[0]
+    return _sha256(_no_repo(str(valor)))
+
+
 def atestar_saidas(portas: dict[str, Any]) -> dict[str, Optional[str]]:
     """sha256 de cada porta declarada no plano, no instante em que o job termina (None =
     arquivo ausente ou acima do teto). Revisão F2 (#10): a referência tirada na 1ª LEITURA do
     envelope dependia do carimbo de tempo — uma troca entre o fim do job e essa leitura que
-    preservasse o mtime (os.utime, cp -p, rsync -t) era selada como saída do script."""
-    return {str(nome): _sha256(_no_repo(str(caminho))) for nome, caminho in portas.items()}
+    preservasse o mtime (os.utime, cp -p, rsync -t) era selada como saída do script.
+    Porta de pasta (F6): o valor é {"caminho", "regra"} e o sha é o da árvore dos membros."""
+    return {str(nome): _sha_porta(valor) for nome, valor in portas.items()}
 
 
 def executar(job_id: str) -> None:

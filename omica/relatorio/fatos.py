@@ -37,8 +37,10 @@ def _escalar(v: Any) -> bool:
 
 def _folhas(dados: Any, prefixo: str = "") -> Iterator[tuple[str, Any, str]]:
     """(campo, valor, rótulo) de cada folha. Lista de valores simples: um fato por item, com
-    o ÍNDICE REAL na lista (o portão reabre `campo` andando pelo mesmo caminho); lista de
-    objetos ou de listas fica fora (nenhum resumo tem, e o caminho não seria estável)."""
+    o ÍNDICE REAL na lista (o portão reabre `campo` andando pelo mesmo caminho). Lista de
+    LISTAS de valores simples (X4, F6: a matriz de confusão do ML): um fato por célula,
+    `{lista}.{i}.{j}`, rotulado "linha i+1, coluna j+1", até MAX_ITENS_LISTA em cada nível.
+    Lista de objetos fica fora (o caminho não seria estável)."""
     if isinstance(dados, dict):
         for k, v in dados.items():
             yield from _folhas(v, f"{prefixo}{k}.")
@@ -47,6 +49,10 @@ def _folhas(dados: Any, prefixo: str = "") -> Iterator[tuple[str, Any, str]]:
         for i, v in enumerate(dados[:MAX_ITENS_LISTA]):
             if _escalar(v):
                 yield f"{lista}.{i}", v, f"{lista}: item {i + 1} de {len(dados)}"
+            elif isinstance(v, list):
+                for j, w in enumerate(v[:MAX_ITENS_LISTA]):
+                    if _escalar(w):
+                        yield f"{lista}.{i}.{j}", w, f"{lista}: linha {i + 1}, coluna {j + 1}"
     elif _escalar(dados):
         yield prefixo[:-1], dados, prefixo[:-1]
 
@@ -139,6 +145,43 @@ def gerar(plano: dict[str, Any], envelopes: dict[str, dict[str, Any]]) -> dict[s
     repetidos = sorted({i for i in ids if ids.count(i) > 1})
     if repetidos:
         raise ValueError(f"ids de fato repetidos: {repetidos[:5]}")
+    invariantes = rel.get("invariantes", [])
     return {"formato": "omica.fatos/1", "run_id": plano["run_id"], "plano_sha256": plano["plano_sha256"],
             "fatos": fatos, "figuras": figuras, "selos": selos,
-            "invariantes": rel.get("invariantes", [])}
+            "invariantes": invariantes,
+            "tabelas_invariantes": _tabelas_invariantes(invariantes, envelopes),
+            "alertas": _alertas(rel.get("alertas") or [], fatos)}
+
+
+def _tabelas_invariantes(invariantes: list[dict[str, Any]],
+                         envelopes: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """X3 (F6): as portas que as invariantes leem INTEIRAS (`porta` e `desempate`), com o
+    arquivo e o sha256 do envelope ENTREGUE — o portão reabre e confere antes de contar.
+    Plano de antes da F6 (sem as chaves): nenhuma."""
+    saida: dict[str, dict[str, Any]] = {}
+    for inv in invariantes:
+        for ref in (inv.get("porta"), inv.get("desempate")):
+            if not ref or ref in saida:
+                continue
+            passo, porta = ref.split(".", 1)
+            info = envelopes[passo]["portas"][porta]
+            saida[ref] = {"arquivo": info["caminho"], "sha256": info["sha256"], "formato": info.get("formato")}
+    return saida
+
+
+def _alertas(alertas: list[dict[str, Any]], fatos: list[dict[str, Any]]) -> list[str]:
+    """X5 (F6): os textos dos alertas que VALEM — incondicional, ou com o fato igual a `igual`.
+    Fato ausente da ficha não é "não vale": a geração falha (409 ficha_impossivel), porque um
+    alerta que some em silêncio é exatamente o que o alerta existe para impedir."""
+    por_id = {f["id"]: f for f in fatos}
+    textos: list[str] = []
+    for a in alertas:
+        fato = a.get("fato") or ""
+        if fato:
+            if fato not in por_id:
+                raise ValueError(f"alerta: fato {fato!r} ausente da ficha")
+            valor = por_id[fato]["valor"]
+            if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor != a.get("igual"):
+                continue
+        textos.append(str(a["texto"]))
+    return textos

@@ -16,6 +16,9 @@ services:
       - "${OMICA_BIND:-127.0.0.1}:${OMICA_PORT:-8710}:8710"
     environment:
       OMICA_IN_DOCKER: "1"
+      # X6 (F6): sem .pyc no repositório montado em /app (o worker gravava __pycache__
+      # cpython-310..313 em modules/*/scripts)
+      PYTHONDONTWRITEBYTECODE: "1"
       OMICA_PORT: "8710"
       OMICA_DATA: /data/omica
       GENOME_DATA: /data
@@ -56,6 +59,7 @@ services:
     command: rq worker omica --url redis://omica-redis:6379/0
     environment:
       OMICA_IN_DOCKER: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       OMICA_DATA: /data/omica
       GENOME_DATA: /data
       SKILLS_DIR: /skills
@@ -79,6 +83,7 @@ services:
     container_name: omica-worker-bioinfo
     environment:
       OMICA_IN_DOCKER: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       OMICA_DATA: /data/omica
       GENOME_DATA: /data
       OMICA_REDIS_URL: redis://omica-redis:6379/0
@@ -100,6 +105,7 @@ services:
     container_name: omica-worker-vep
     environment:
       OMICA_IN_DOCKER: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       OMICA_DATA: /data/omica
       GENOME_DATA: /data
       OMICA_REDIS_URL: redis://omica-redis:6379/0
@@ -121,6 +127,7 @@ services:
     container_name: omica-worker-methyl
     environment:
       OMICA_IN_DOCKER: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       OMICA_DATA: /data/omica
       GENOME_DATA: /data
       OMICA_REDIS_URL: redis://omica-redis:6379/0
@@ -144,6 +151,7 @@ services:
     container_name: omica-worker-ml
     environment:
       OMICA_IN_DOCKER: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       OMICA_DATA: /data/omica
       GENOME_DATA: /data
       OMICA_REDIS_URL: redis://omica-redis:6379/0

@@ -813,9 +813,27 @@ def servir_resultado(request: Request, rel: str):
     partes = caminho.relative_to(base).parts
     if len(partes) > 3 and partes[0] == "projetos" and _oculto(request, partes[1], partes[2]):
         return RedirectResponse("/", status_code=303)
+    if _copia_bruta(partes):
+        return RedirectResponse("/", status_code=303)
     from fastapi.responses import FileResponse
 
     return FileResponse(caminho)
+
+
+def _copia_bruta(partes: tuple[str, ...]) -> bool:
+    """X9 (F6, crítica M13): /resultados não serve a cópia BRUTA de dado de entrada — um
+    coverage (`.cov`/`.cov.gz`, a regra de leitura de formatos.DIRETORIOS, aqui sem distinguir
+    caixa) nem qualquer arquivo DENTRO de uma porta de pasta (`runs/<run>/<passo>/<subpasta>/
+    <arquivo>`: mais de 4 componentes a partir de `runs`). A porta `montar.coverages` é a cópia
+    dos coverages do autor, renomeados; vale no demo e em projetos/…. As figuras e tabelas dos
+    passos (`runs/<run>/<passo>/<arquivo>`) continuam servidas; as do relatório saem por
+    /relatorios/<run>/figuras/."""
+    from omica.contrato.formatos import DIRETORIOS
+
+    nome = partes[-1] if partes else ""
+    if any(re.search(r["leitura"], nome, re.IGNORECASE) for r in DIRETORIOS.values() if r.get("leitura")):
+        return True
+    return any(p == "runs" and len(partes) - i > 4 for i, p in enumerate(partes))
 
 
 _FIGURA_RELATORIO = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-]{0,120}\.png", re.ASCII)

@@ -14,9 +14,11 @@ Fluxo com o n8n (a chave da Anthropic fica SÓ no n8n; aqui nunca passa):
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import shutil
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Optional
 
@@ -65,15 +67,70 @@ def _envelopes(pasta: Path, plano: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return envs
 
 
+_INSTRUCAO_ALERTAS = ("obrigatórios: declare cada um em limitações, com estas palavras, e não interprete o "
+                      "que ele invalida")
+
+
+def _normalizar(texto: str) -> str:
+    """NFKD sem marcas, casefold: 'Epigenômica ' → 'epigenomica'."""
+    return "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)).casefold().strip()
+
+
+def _ids_de_modulo() -> set[str]:
+    """Os ids de módulo que um aviso pode citar: os do registry e as pastas de modules/ com
+    manifest (um manifest inválido não transforma o aviso dele em aviso geral)."""
+    from omica.registry import load_registry
+
+    ids = {m.id for m in load_registry().modules}
+    pasta = REPO_ROOT / "modules"
+    if pasta.is_dir():
+        ids |= {d.name for d in pasta.iterdir() if (d / "manifest.yaml").is_file()}
+    return ids
+
+
+def avisos_que_valem(plano: dict[str, Any]) -> list[str]:
+    """X5′ (F6, crítica M4): os avisos do subprojeto (`plano["contexto"]["avisos"]`) que valem
+    para o módulo do plano — o prefixo antes do primeiro ':', normalizado, é o id do módulo do
+    plano, ou não é id de módulo nenhum (aviso geral). "epigenômica: painel_108 v1…" vale para
+    a epigenômica e não para a genômica, sem editar o YAML. Plano sem a chave (antes da F6):
+    nenhum."""
+    ctx = plano.get("contexto")
+    avisos = ctx.get("avisos") if isinstance(ctx, dict) else None
+    if not isinstance(avisos, list) or not avisos:
+        return []
+    modulos = {_normalizar(m) for m in _ids_de_modulo()}
+    proprio = _normalizar(str(plano.get("modulo") or ""))
+    saida = []
+    for a in avisos:
+        if not isinstance(a, str) or not a.strip():
+            continue
+        prefixo = _normalizar(a.partition(":")[0])
+        if prefixo == proprio or prefixo not in modulos:
+            saida.append(a)
+    return saida
+
+
 def _mensagem(ficha: dict[str, Any], plano: dict[str, Any], run: dict[str, Any]) -> str:
     """A ficha em forma legível para o redator: ids exatos, rótulo e valor JÁ formatado (ele
-    precisa ver os valores para escrever com sentido, mas só os cita por id)."""
+    precisa ver os valores para escrever com sentido, mas só os cita por id). F6: a linha do
+    contexto, os ALERTAS DO SUBPROJETO que valem para o módulo (X5′) e os ALERTAS do pipeline
+    (X5), que o redator TEM de declarar."""
     linhas = [f"Pipeline: {plano['pipeline']} (módulo {plano['modulo']}). Run {plano['run_id']}.",
               "Passos executados:"]
     for p in plano["passos"]:
         selo = ficha["selos"].get(p["id"])
         linhas.append(f"- {p['id']}: {p['titulo']} (selo do código: {selo})")
     linhas.append("Escolhas do autor: " + json.dumps(plano.get("escolhas", {}), ensure_ascii=False))
+    ctx = plano.get("contexto")
+    if isinstance(ctx, dict):
+        linhas.append(f"Contexto: {ctx.get('especie')}/{ctx.get('subprojeto')} (assembly {ctx.get('assembly')}).")
+    avisos = avisos_que_valem(plano)
+    if avisos:
+        linhas.append(f"\nALERTAS DO SUBPROJETO ({_INSTRUCAO_ALERTAS}):")
+        linhas += [f"- {a}" for a in avisos]
+    if ficha.get("alertas"):
+        linhas.append(f"\nALERTAS ({_INSTRUCAO_ALERTAS}):")
+        linhas += [f"- {a}" for a in ficha["alertas"]]
     linhas.append("\nFICHA DE FATOS (cite SÓ por {{f:id}}):")
     for f in ficha["fatos"]:
         linhas.append(f"- {f['id']} = {formatar(f['valor'])}  ({f['rotulo']})")
@@ -123,6 +180,22 @@ table{{border-collapse:collapse;font-size:.8rem;width:100%}} td,th{{border:1px s
 abbr{{text-decoration:underline dotted;cursor:help}} .fato{{font-variant-numeric:tabular-nums}}
 @media (prefers-color-scheme: dark){{body{{background:#121820;color:#e3e9ef}} td,th{{border-color:#33404d}}}}
 </style></head><body>{corpo}</body></html>"""
+
+
+def _bloco_alertas(plano: dict[str, Any], ficha: dict[str, Any]) -> str:
+    """X5/X5′ (F6): os avisos do subprojeto que valem e os alertas do pipeline ABREM o HTML,
+    escapados e FORA do texto do redator — o que ele escreveu passou pelo portão de números; isto
+    é da plataforma e vai do jeito que está. Vazio quando não há nenhum."""
+    partes = []
+    avisos = avisos_que_valem(plano)
+    if avisos:
+        itens = "".join(f"<li>{html.escape(a)}</li>" for a in avisos)
+        partes.append(f'<section class="alertas"><h2>Avisos do subprojeto</h2><ul>{itens}</ul></section>')
+    alertas = [a for a in (ficha.get("alertas") or []) if isinstance(a, str)]
+    if alertas:
+        itens = "".join(f"<li>{html.escape(a)}</li>" for a in alertas)
+        partes.append(f'<section class="alertas"><h2>Alertas</h2><ul>{itens}</ul></section>')
+    return "".join(partes)
 
 
 def receber(run_id: str, bruto: Any, modelo: str = "", stop_reason: str = "",
@@ -194,7 +267,9 @@ def _receber(run_id: str, pasta: Path, plano: dict[str, Any], run: dict[str, Any
     titulo = f"Relatório — {plano['pipeline']} ({run_id})"
     r = renderizar(rascunho, ficha, resultado, plano["modulo"], titulo,
                    arquivos_rel=lambda c: c[len(raiz):] if c.startswith(raiz) else c)
-    (saida / "relatorio.html").write_text(_pagina(titulo, r["html"]), encoding="utf-8")
+    corpo, h1, bloco = r["html"], f"<h1>{html.escape(titulo)}</h1>", _bloco_alertas(plano, ficha)
+    corpo = h1 + bloco + corpo[len(h1):] if corpo.startswith(h1) else bloco + corpo  # logo depois do título
+    (saida / "relatorio.html").write_text(_pagina(titulo, corpo), encoding="utf-8")
     (saida / "relatorio.md").write_text(r["markdown"], encoding="utf-8")
     (saida / "proveniencia.json").write_text(json.dumps(
         {"run_id": run_id, "plano_sha256": plano["plano_sha256"], "modelo_redator": modelo,

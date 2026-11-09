@@ -43,6 +43,15 @@ O que este arquivo existe para garantir:
 Armazenamento: work/runs/<run_id>/{run.json, plano_proposto.json, plano.json,
 envelopes/<passo>.json (entregue)}; entradas copiadas em raw/runs/<run_id>/<nome><sufixo>
 (+ os índices irmãos); a entrada por referência fica onde está e nunca é apagada.
+
+PASTA (F6, ESPEC §1.A e adendo v2 §A3): um formato de `formatos.DIRETORIOS` entra só por
+CAMINHO e por CÓPIA, em raw/runs/<run_id>/<nome>/<membro> (os nomes exatos dos membros e o
+mtime), e sai de um passo como SUBPASTA de {saida}. Membro é o que o consumidor lê (a regra
+congelada no registro e no plano, `omica/contrato/diretorio.py`); o registro usa as chaves do
+de arquivo (`sha256` = sha da árvore, `bytes` = soma), mais `tipo`, `regra`, `membros` e
+`n_membros` — e tudo o que só compara (o plano, `_exigir_atestavel`, o atestado do worker, o
+envelope gravado) continua comparando. No Linux a listagem e a leitura passam por um dir_fd
+conferido contra a identidade da validação do caminho e contra a raiz (/proc/self/fd).
 """
 from __future__ import annotations
 
@@ -62,7 +71,7 @@ from typing import Any, Iterator, Optional
 from omica import __version__, contexto, proveniencia
 from omica.chaves_contexto import ESPECIE_LEGADA, ID_ESPECIE, SLUG, SLUG_DEMO
 from omica.config import REPO_ROOT, get_config
-from omica.contrato import bgzf, formatos
+from omica.contrato import bgzf, diretorio, formatos
 from omica.jobs import dispatch, queue, script_job
 from omica.pipelines import Entrada, Pipeline, carregar_pipelines, spec_api
 from omica.registry import Manifest, ScriptSpec, load_registry
@@ -78,6 +87,7 @@ _MAX_SHA = 512 * 1024 * 1024
 _MAX_RESUMO = 1024 * 1024
 _MAX_CAMINHO = 1024
 _MAX_LISTA_PERFIL = 50
+_MAX_MEMBROS_AMOSTRA = 20  # F6: nomes de membros de uma pasta no GET do run (a lista completa vai no plano)
 ATIVOS = ("aprovado", "executando")
 ABERTOS = ("criado", "planejado")
 # dispatch.lancar_script dá ao RQ job_timeout de 6 h: o próprio RQ mata o job e o marca
@@ -442,19 +452,24 @@ def _raizes_de_entrada() -> list[Path]:
 
 
 _DETALHE_CAMINHO = ("entrada por caminho só de <dados>/entradas/, modules/<módulo>/demo_data|data/ "
-                    "ou das raízes de referência configuradas (arquivo existente)")
+                    "ou das raízes de referência configuradas (arquivo ou pasta existente)")
 
 
 def _recusa_caminho() -> ErroRun:
     """O 422 de TODA recusa de caminho, com o mesmo corpo para todas as entradas: fora das
     raízes, inexistente, modo não aceito, nome sem o sufixo do formato, não regular, irmão
-    fora da raiz. Corpos diferentes viravam oráculo de existência de arquivo."""
+    fora da raiz, pasta onde se espera arquivo (e o inverso), membro de pasta recusado.
+    Corpos diferentes viravam oráculo de existência de arquivo."""
     return ErroRun(422, "caminho_recusado", detalhe=_DETALHE_CAMINHO)
 
 
-def _fonte_da_entrada(caminho: str, ent: Entrada) -> tuple[Path, str, Path]:
+def _fonte_da_entrada(caminho: str, ent: Entrada) -> tuple[Path, str, Path, Optional[tuple[int, int]]]:
     """Portão PRÓPRIO da entrada por caminho (o dispatch._validar_caminho é dos parâmetros de
-    script e aceita /data de propósito). Devolve (arquivo resolvido, modo, raiz).
+    script e aceita /data de propósito). Devolve (arquivo resolvido, modo, raiz, identidade);
+    a identidade (st_dev, st_ino) só existe para PASTA (F6, adendo §A3.2): é o que o registro
+    confere no dir_fd que abre depois — uma pasta trocada no meio, ou um componente-pai
+    trocado por symlink, dá o mesmo 422. A pasta pode ser a própria raiz (modules/epigenomica/
+    demo_data é uma).
 
     Resolve antes de comparar — strict, seguindo symlink: um link apontando para fora é
     recusado. O MODO sai da raiz em que o caminho resolvido cai (caixa de entrada = cópia;
@@ -482,12 +497,20 @@ def _fonte_da_entrada(caminho: str, ent: Entrada) -> tuple[Path, str, Path]:
                 or not dispatch._TOKEN_SEGURO.fullmatch(texto)):
             raise recusa
     try:
-        regular = stat.S_ISREG(fonte.stat().st_mode)
+        modo_st = fonte.stat().st_mode
     except OSError:
         raise recusa from None
-    if not regular:  # FIFO, dispositivo: ler travaria ou não teria fim
+    if ent.formato in formatos.DIRETORIOS:
+        # pasta onde se espera pasta (S_ISDIR); arquivo aqui é o mesmo 422, sem eco
+        if not stat.S_ISDIR(modo_st):
+            raise recusa
+        try:
+            return fonte, modo, raiz, diretorio.identidade_pasta(fonte)
+        except diretorio.ErroMembros:
+            raise recusa from None
+    if not stat.S_ISREG(modo_st):  # FIFO, dispositivo, PASTA: ler travaria ou não teria fim
         raise recusa
-    return fonte, modo, raiz
+    return fonte, modo, raiz, None
 
 
 def _irmaos_de(fonte: Path, formato: str, raiz: Path) -> dict[str, Path]:
@@ -578,7 +601,9 @@ def _apagar_copias_antigas(run_id: str, anterior: Optional[dict[str, Any]], mant
     """Re-registrar uma entrada deixava órfãs a versão adaptada (F3), os índices e qualquer
     cópia de nome diferente — até 256 MB cada, para sempre. Só apaga DENTRO de
     raw/runs/<run_id>/ (pai exato): a origem de uma entrada por caminho e o arquivo de uma
-    referência nunca são tocados."""
+    referência nunca são tocados.
+    F6: a cópia de uma PASTA é apagada inteira (rmtree) — o unlink numa pasta dava OSError,
+    engolido, e a pasta ficava órfã. Só pasta comum: symlink ou junção nunca é seguido."""
     if not anterior:
         return
     pasta = (get_config().raw_dir / "runs" / run_id).resolve()
@@ -587,7 +612,11 @@ def _apagar_copias_antigas(run_id: str, anterior: Optional[dict[str, Any]], mant
         with contextlib.suppress(OSError):
             alvo = Path(caminho).resolve()
             if alvo.parent == pasta and alvo not in vigentes:
-                alvo.unlink(missing_ok=True)
+                if (alvo.is_dir() and not os.path.islink(caminho) and not alvo.is_symlink()
+                        and not diretorio.eh_reparse(alvo)):
+                    shutil.rmtree(alvo)
+                else:
+                    alvo.unlink(missing_ok=True)
 
 
 def _compactar_veredito(v: dict[str, Any]) -> dict[str, Any]:
@@ -610,8 +639,13 @@ def _derivar(p: Pipeline, run: dict[str, Any]) -> None:
 
 
 def _upload_permitido(nome: str, ent: Entrada) -> None:
-    """As duas regras do upload (G1 §1.4). Upload não traz o índice: um VCF sem .tbi/.csi ao
-    lado só seria reprovado DEPOIS de ler até 256 MiB de corpo."""
+    """As regras do upload (G1 §1.4). Upload não traz o índice: um VCF sem .tbi/.csi ao
+    lado só seria reprovado DEPOIS de ler até 256 MiB de corpo. Nem uma PASTA (F6): o corpo
+    cru é um arquivo só."""
+    if ent.formato in formatos.DIRETORIOS:
+        raise ErroRun(422, "entrada_exige_caminho", entrada=nome,
+                      detalhe="este formato é uma PASTA: envie o caminho da pasta no servidor, "
+                              "{\"caminho\": ...}, numa caixa de entrada (<dados>/entradas/...)")
     if ent.formato in formatos.IRMAOS:
         raise ErroRun(422, "entrada_exige_indice", entrada=nome,
                       detalhe="este formato precisa do índice ao lado (.tbi/.csi): envie o caminho do "
@@ -624,9 +658,9 @@ def _upload_permitido(nome: str, ent: Entrada) -> None:
 def aceita_upload(run_id: str, nome: str) -> None:
     """Portão BARATO do upload, para a rota chamar ANTES de ler o corpo (G1 §1.4): lê só o
     run.json e o contrato, sem trava. 409 entradas_congeladas (run aprovado ou adiante: o
-    corpo seria lido para nada); 404 entrada_inexistente; 422
-    entrada_exige_indice; 422 entrada_so_por_referencia — na ordem do registrar_entrada, que
-    repete as regras sob a trava."""
+    corpo seria lido para nada); 404 entrada_inexistente; 422 entrada_exige_caminho (pasta,
+    F6); 422 entrada_exige_indice; 422 entrada_so_por_referencia — na ordem do
+    registrar_entrada, que repete as regras sob a trava."""
     run = _carregar(run_id)
     if run["estado"] not in ABERTOS:
         raise ErroRun(409, "entradas_congeladas", estado=run["estado"])
@@ -740,6 +774,111 @@ def _registrar_copia(run_id: str, nome: str, ent: Entrada, p: Pipeline, run: dic
     return registro, derivado, {final, *(Path(f"{final}{s}") for s in novos)}
 
 
+def _copiar_membro(fd: int, destino: Path, teto: int) -> int:
+    """O laço de `_copiar_entrada` lendo do fd de `diretorio.abrir_membro` (o inode conferido
+    contra a listagem): teto em FLUXO, temporário na mesma pasta, mtime herdado do fstat do
+    próprio fd. Fecha o fd. Devolve os bytes copiados."""
+    grande = ErroRun(413, "entrada_grande_demais", limite_bytes=_MAX_ENTRADA)
+    tmp = destino.with_name(f".{destino.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        with os.fdopen(fd, "rb") as r:
+            st = os.fstat(r.fileno())
+            if st.st_size > teto:
+                raise grande
+            total = 0
+            with tmp.open("wb") as w:
+                while bloco := r.read(1 << 20):
+                    total += len(bloco)
+                    if total > teto:
+                        raise grande
+                    w.write(bloco)
+        with contextlib.suppress(OSError):
+            os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+        _trocar(tmp, destino)
+        return total
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+
+
+def _registrar_copia_dir(run_id: str, nome: str, ent: Entrada, p: Pipeline, run: dict[str, Any], *,
+                         fonte: Path, raiz: Path, identidade: Optional[tuple[int, int]],
+                         origem: str) -> tuple[dict[str, Any], dict[str, Any], set[Path]]:
+    """Cópia ATÔMICA de uma PASTA (F6, ESPEC §1.A.4 e adendo §A3.2), no padrão de
+    `_registrar_copia`: os membros vão para raw/runs/<id>/.registro.<hex>/<nome>/ com os nomes
+    EXATOS (o grupo sai do nome) e o mtime da origem, são validados e derivados lá, e só então
+    a pasta entra no lugar — em três passos, porque o os.replace não substitui pasta não vazia:
+    a final antiga vira `.velho.<hex>`, a nova entra, a velha é apagada.
+
+    Membro recusado (diretorio.ErroMembros) → o 422 `caminho_recusado` de sempre, sem eco;
+    teto (1024 membros, 100 000 entradas, 256 MiB somados, ou o teto agregado de
+    descompressão do validador: `perfil["teto"]`) → 413 `entrada_grande_demais` com o limite.
+    Confinamento (L8): a pasta é aberta UMA vez (dir_fd no Linux) e conferida contra a
+    identidade (st_dev, st_ino) tirada no portão do caminho e contra a raiz pelo caminho REAL
+    do fd; toda listagem e abertura passa por ela. No host Windows (sem dir_fd), depois da
+    cópia, a pasta é resolvida de novo e tem de dar o mesmo caminho e a mesma identidade.
+    Qualquer falha antes da troca não muda nada."""
+    pasta = get_config().raw_dir / "runs" / run_id
+    pasta.mkdir(parents=True, exist_ok=True)
+    final = pasta / nome
+    regra = dict(formatos.DIRETORIOS[ent.formato])
+    tmpdir = pasta / f".registro.{secrets.token_hex(4)}"
+    tmpdir.mkdir()
+    try:
+        novo = tmpdir / nome
+        novo.mkdir()
+        try:
+            with diretorio.abrir_pasta(fonte, identidade=identidade, raiz=raiz) as aberta:
+                usados = 0
+                for membro, st in diretorio.listar_membros(aberta, regra):
+                    if usados + st.st_size > _MAX_ENTRADA:  # antes de abrir: o stat já estoura
+                        raise ErroRun(413, "entrada_grande_demais", limite_bytes=_MAX_ENTRADA)
+                    fd = diretorio.abrir_membro(aberta, membro, st.st_ino)
+                    usados += _copiar_membro(fd, novo / membro, _MAX_ENTRADA - usados)
+            # a pasta resolvida de novo é a mesma do portão (no Linux o dir_fd já garantiu; no
+            # Windows é a única conferência de troca de componente-pai)
+            try:
+                mesma = fonte.resolve(strict=True) == fonte
+            except (OSError, RuntimeError):
+                mesma = False
+            if not mesma or diretorio.identidade_pasta(fonte) != identidade:
+                raise _recusa_caminho()
+        except diretorio.ErroMembros as e:
+            if e.teto:
+                raise ErroRun(413, "entrada_grande_demais", **e.limite) from None
+            raise _recusa_caminho() from None
+        v = formatos.validar(ent.formato, novo)
+        teto = (v.perfil or {}).get("teto")
+        if not v.ok and isinstance(teto, dict) and teto:
+            # estouro de TETO do validador (linhas, bytes descomprimidos, cromossomos): é tamanho,
+            # não formato — 413, como o teto de membros, e nada é registrado
+            raise ErroRun(413, "entrada_grande_demais", **teto)
+        arv = diretorio.sha_diretorio(novo, regra, _MAX_ENTRADA)
+        registro: dict[str, Any] = {
+            "modo": "copia", "tipo": "diretorio", "caminho": novo.as_posix(), "origem": origem,
+            "formato": ent.formato, "regra": regra, "n_membros": arv["n_membros"], "bytes": arv["bytes"],
+            "membros": arv["membros"], "sha256": arv["sha256"], "veredito": _compactar_veredito(v.to_dict())}
+        derivado = {**run, "entradas": {**run["entradas"], nome: registro}}
+        _derivar(p, derivado)  # checagens sobre a pasta temporária: os nomes dos membros são os finais
+        velho: Optional[Path] = None
+        if os.path.lexists(final):
+            velho = pasta / f".velho.{secrets.token_hex(4)}"
+            _trocar(final, velho)
+        try:
+            _trocar(novo, final)
+        except BaseException:
+            if velho is not None:  # devolve a antiga: o run.json ainda aponta para ela
+                with contextlib.suppress(OSError):
+                    _trocar(velho, final)
+            raise
+        if velho is not None:
+            shutil.rmtree(velho, ignore_errors=True)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    registro["caminho"] = final.as_posix()
+    return registro, derivado, {final}
+
+
 def registrar_entrada(run_id: str, nome: str, *, conteudo: Optional[bytes] = None,
                       caminho: Optional[str] = None) -> dict[str, Any]:
     """Entrada por upload (bytes) ou por caminho no servidor. Caminho na caixa de entrada (e
@@ -764,17 +903,22 @@ def registrar_entrada(run_id: str, nome: str, *, conteudo: Optional[bytes] = Non
                 run_id, nome, ent, p, run, conteudo=conteudo, fonte=None, origem="upload", irmaos_fonte={})
         else:
             assert caminho is not None
-            fonte, modo, raiz = _fonte_da_entrada(caminho, ent)
-            irmaos_fonte = _irmaos_de(fonte, ent.formato, raiz)
-            if modo == "referencia":
-                registro = _registrar_referencia(nome, ent, fonte, caminho, irmaos_fonte)
+            fonte, modo, raiz, identidade = _fonte_da_entrada(caminho, ent)
+            if ent.formato in formatos.DIRETORIOS:
+                # F6: pasta só por cópia (C7, e o portão já recusou a raiz de referência); a
+                # pasta não tem índice irmão (candidatos_irmaos de pasta é ())
+                registro, derivado, manter = _registrar_copia_dir(
+                    run_id, nome, ent, p, run, fonte=fonte, raiz=raiz, identidade=identidade,
+                    origem=f"caminho:{caminho}")
+            elif modo == "referencia":
+                registro = _registrar_referencia(nome, ent, fonte, caminho, _irmaos_de(fonte, ent.formato, raiz))
                 derivado = {**run, "entradas": {**run["entradas"], nome: registro}}
                 _derivar(p, derivado)
                 manter = set()
             else:
                 registro, derivado, manter = _registrar_copia(
                     run_id, nome, ent, p, run, conteudo=None, fonte=fonte, origem=f"caminho:{caminho}",
-                    irmaos_fonte=irmaos_fonte)
+                    irmaos_fonte=_irmaos_de(fonte, ent.formato, raiz))
         run["entradas"][nome] = registro
         for chave in ("checagens", "escolhas_opcoes", "passos_pipeline"):
             run[chave] = derivado[chave]
@@ -901,6 +1045,14 @@ def _exigir_atestavel(nome: str, reg: dict[str, Any]) -> None:
     if reg.get("modo") == "referencia":
         imp = reg.get("impressao")
         esperados += [imp.get("amostra_sha256") if isinstance(imp, dict) else None]
+    if reg.get("tipo") == "diretorio":
+        # F6: a árvore e CADA membro (um sha None num membro faria a árvore "conferir" com
+        # outra pasta qualquer cujo membro também passasse do teto)
+        membros = reg.get("membros")
+        if not isinstance(membros, dict) or not membros or not isinstance(reg.get("regra"), dict):
+            esperados.append(None)
+        else:
+            esperados += [m.get("sha256") if isinstance(m, dict) else None for m in membros.values()]
     if any(e is None for e in esperados):
         raise ErroRun(409, "entrada_nao_atestavel", entrada=nome)
 
@@ -948,6 +1100,16 @@ def _entradas_intactas(entradas: dict[str, Any]) -> None:
             esperado = reg["impressao"]
             if (imp["bytes"], imp["amostra_sha256"]) != (esperado.get("bytes"), esperado.get("amostra_sha256")):
                 raise ErroRun(409, "entrada_alterada", entrada=nome)
+        elif reg.get("tipo") == "diretorio":
+            # F6: a árvore inteira, com a regra do PLANO — membro novo que casa a regra,
+            # removido, renomeado ou 1 byte trocado (mesmo com o mtime devolvido) mudam o sha;
+            # um arquivo fora da regra (notas.txt) não é membro e não muda
+            try:
+                arv = diretorio.sha_diretorio(Path(reg["caminho"]), reg["regra"], _MAX_SHA)
+            except (diretorio.ErroMembros, OSError):
+                raise ErroRun(409, "entrada_alterada", entrada=nome) from None
+            if arv["sha256"] is None or arv["sha256"] != reg["sha256"]:
+                raise ErroRun(409, "entrada_alterada", entrada=nome)
         else:
             # adaptada: o arquivo que o script lê E o original de onde ele saiu (proveniência)
             for r in (reg, reg.get("original")) if reg.get("original") else (reg,):
@@ -959,7 +1121,9 @@ def _entradas_intactas(entradas: dict[str, Any]) -> None:
 
 # Tudo do registro de uma entrada vai ao plano, menos o veredito (que fica no run.json)
 _CAMPOS_DA_ENTRADA_NO_PLANO = ("caminho", "formato", "bytes", "sha256", "origem", "original", "adaptacao",
-                               "modo", "impressao", "irmaos", "candidatos_irmaos")
+                               "modo", "impressao", "irmaos", "candidatos_irmaos",
+                               # F6: pasta (a regra e a lista completa dos membros, com o sha de cada um)
+                               "tipo", "regra", "membros", "n_membros")
 
 
 def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
@@ -993,6 +1157,11 @@ def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
             if escolhas.get(nome) not in (op["valores"] or []):
                 raise ErroRun(422, "escolha_fora_do_dado", escolha=nome,
                               recebido=escolhas.get(nome), validos=op["valores"])
+        # X1 (F6): o contraste de um grupo com ele mesmo não é contraste (0 DMC com rc 0;
+        # IndexError no ml_classificar)
+        for nome, esc in p.escolhas_autor.items():
+            if esc.diferente_de is not None and escolhas.get(nome) == escolhas.get(esc.diferente_de):
+                raise ErroRun(422, "escolhas_iguais", escolha=nome, outra=esc.diferente_de)
 
         # o contexto de AGORA (o YAML pode ter mudado desde o criar) e a regra de execução de
         # novo: um subprojeto que deixou de listar o pipeline não planeja
@@ -1005,6 +1174,12 @@ def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
         for passo in p.passos:
             spec = spec_api(m, passo.script)
             assert spec is not None  # validar_contrato já garantiu
+            # X7 (F6, crítica M3): parâmetro fixado no pipeline (params ou liga) e também
+            # sobrescrito pelo contexto — o pipeline passaria por cima do subprojeto em
+            # silêncio. Parâmetro do DADO vai no subprojeto (escopo: subprojeto), não no passo.
+            conflito = sorted((set(passo.params) | set(passo.liga)) & set(ctx.padroes(p.modulo, spec.key)))
+            if conflito:
+                raise ErroRun(422, "parametro_fixo_no_pipeline", passo=passo.id, parametros=conflito)
             valores: dict[str, str] = {}
             for param, ref in passo.liga.items():
                 origem, _, campo = ref.partition(".")
@@ -1031,9 +1206,13 @@ def propor_plano(run_id: str, escolhas: dict[str, str]) -> dict[str, Any]:
                 cmd = dispatch.montar_cmd(spec, valores, saida=saida, ctx=ctx, mod_id=p.modulo)
             except ValueError as e:
                 raise ErroRun(422, "parametro_recusado", passo=passo.id, detalhe=str(e)) from None
-            portas = {nome: {"arquivo": porta.arquivo, "formato": porta.formato,
-                             "caminho": f"{saida}/{porta.arquivo}"}
-                      for nome, porta in spec.produz.items()}
+            portas: dict[str, dict[str, Any]] = {}
+            for nome, porta in spec.produz.items():
+                portas[nome] = {"arquivo": porta.arquivo, "formato": porta.formato,
+                                "caminho": f"{saida}/{porta.arquivo}"}
+                if porta.formato in formatos.DIRETORIOS:
+                    # F6: porta de PASTA (subpasta de {saida}); a regra de membros fica no plano
+                    portas[nome].update(tipo="diretorio", regra=dict(formatos.DIRETORIOS[porta.formato]))
             resolvidos[passo.id] = {"valores": valores, "portas": portas}
             passos.append({
                 "id": passo.id, "script": spec.key, "titulo": spec.titulo,
@@ -1239,9 +1418,17 @@ def _entrega_intacta(run_id: str, passo_id: str, job_id: str) -> bool:
         return False
     for nome, esperado in assinatura.items():
         try:
-            if _assinatura(Path(portas[nome]["caminho"]).stat()) != esperado:
+            if isinstance(esperado, dict):
+                # F6: porta de PASTA — relista (no máximo 1024 stat): membro novo, removido ou
+                # trocado muda a assinatura e cai no envelope completo
+                regra = portas[nome].get("regra")
+                if not isinstance(regra, dict):
+                    return False
+                if diretorio.assinatura(Path(portas[nome]["caminho"]), regra) != esperado:
+                    return False
+            elif _assinatura(Path(portas[nome]["caminho"]).stat()) != esperado:
                 return False
-        except (OSError, KeyError, TypeError):
+        except (OSError, KeyError, TypeError, AttributeError, diretorio.ErroMembros):
             return False
     return True
 
@@ -1426,8 +1613,10 @@ def executar_passo(run_id: str, passo_id: str) -> dict[str, Any]:
         _entradas_intactas(plano["entradas"])
         extra_meta: dict[str, Any] = {
             "run_id": run_id, "passo": passo_id,
-            # o worker atesta o sha de cada porta ao terminar (envelope, #10)
-            "portas": {n: p["caminho"] for n, p in item["portas"].items()}}
+            # o worker atesta o sha de cada porta ao terminar (envelope, #10); a de PASTA (F6) vai
+            # com a regra do plano: o sha é o da árvore dos membros
+            "portas": {n: ({"caminho": p["caminho"], "regra": p.get("regra")} if p.get("tipo") == "diretorio"
+                           else p["caminho"]) for n, p in item["portas"].items()}}
         consumidas = _entradas_consumidas(item)
         if consumidas:
             # e as entradas que o passo lê, ao começar e ao terminar (G1 §1.8): o esperado sai
@@ -1515,7 +1704,10 @@ def _ler_resumo(caminho: Path) -> Any:
     try:
         if caminho.stat().st_size > _MAX_RESUMO:
             return {"_omitido": "resumo maior que 1 MB"}
-        return json.loads(caminho.read_text(encoding="utf-8"))
+        # X2 (F6): NaN/Infinity viram null — o JSONResponse serializa com allow_nan=False, e o
+        # GET do envelope (e o /aguardar, o polling do n8n) virava 500; o veredito do formato
+        # (resumo_json) já reprova a porta
+        return formatos.json_finito(caminho.read_text(encoding="utf-8"), nao_finito="none")
     except (OSError, ValueError, RecursionError):
         return None
 
@@ -1601,6 +1793,10 @@ def _espec_da_entrada(reg: dict[str, Any]) -> dict[str, Any]:
         "candidatos_irmaos": _candidatos_irmaos(reg)}
     if esp["modo"] == "referencia":
         esp["impressao"] = reg.get("impressao")
+    if reg.get("tipo") == "diretorio":
+        # F6: o worker atesta a ÁRVORE com esta regra e a ecoa; regra ou tipo diferentes do
+        # plano são "outro arquivo" (tag `caminho` de script_job.divergencias)
+        esp["tipo"], esp["regra"] = "diretorio", reg.get("regra")
     return esp
 
 
@@ -1641,6 +1837,57 @@ def _conferir_entradas_do_worker(status: dict[str, Any], item: dict[str, Any],
         if "indice" in no_inicio | no_fim:
             falhas.append(f"{n}: índice da entrada difere do aprovado")
     return falhas
+
+
+def _porta_pasta(nome: str, porta: dict[str, Any], arq: Path, inicio: Optional[float], fim: Optional[float],
+                 folga: float, sha_worker: Optional[dict[str, Any]],
+                 assinatura: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """O portão de uma porta de PASTA (F6, ESPEC §1.A.7): pasta comum (sem symlink nem junção),
+    membros pela regra do PLANO, ao menos um, os fixos presentes, a janela de tempo do job em
+    CADA membro (um membro de tentativa anterior reprova), a árvore atestável (sha), igual à
+    que o worker atestou ao terminar, e o validador do formato. Devolve (info, falhas) e põe a
+    assinatura da pasta (diretorio.assinatura) em `assinatura[nome]`."""
+    regra = porta.get("regra")
+    info: dict[str, Any] = {"formato": porta["formato"], "caminho": porta["caminho"], "tipo": "diretorio",
+                            "regra": regra,
+                            "existe": not arq.is_symlink() and arq.is_dir() and not diretorio.eh_reparse(arq)}
+    if not info["existe"]:
+        return info, [f"{nome}: pasta não gerada (ou não é pasta comum)"]
+    if not isinstance(regra, dict):
+        return info, [f"{nome}: porta de pasta sem regra de membros no plano"]
+    falhas: list[str] = []
+    try:
+        # ANTES do sha (como o stat da porta de arquivo): uma escrita no meio desfaz a assinatura
+        assin = diretorio.assinatura(arq, regra)
+    except diretorio.ErroMembros as e:
+        return info, [f"{nome}: {e}"]
+    membros = assin["membros"]
+    if not membros:
+        return info, [f"{nome}: pasta sem membros"]
+    falhas += [f"{nome}: {f} não gerado" for f in (regra.get("fixos") or []) if f not in membros]
+    for membro, (_tam, mtime_ns, _ct, _ino) in membros.items():
+        mtime = mtime_ns / 1e9
+        if inicio is not None and mtime < inicio:
+            info["anterior_ao_job"] = True
+            falhas.append(f"{nome}/{membro}: arquivo anterior ao início do job (não foi reescrito)")
+        if fim is not None and mtime > fim + folga:
+            info["posterior_ao_job"] = True
+            falhas.append(f"{nome}/{membro}: arquivo escrito depois do fim do job")
+    assinatura[nome] = assin
+    try:
+        arv = diretorio.sha_diretorio(arq, regra, _MAX_SHA)
+    except diretorio.ErroMembros as e:
+        return info, [*falhas, f"{nome}: {e}"]
+    info.update(sha256=arv["sha256"], bytes=arv["bytes"], n_membros=arv["n_membros"])
+    if arv["sha256"] is None:
+        falhas.append(f"{nome}: {arv['bytes']} bytes > {_MAX_SHA}: sem sha256, a pasta não é atestável")
+    if sha_worker is not None:
+        falhas += _conferir_sha_do_worker(nome, sha_worker, arv["sha256"])
+    v = formatos.validar(porta["formato"], arq)
+    info["validado"], info["falhas_formato"], info["perfil"] = v.ok, v.falhas, v.perfil
+    if not v.ok:
+        falhas.append(f"{nome}: fora do formato {porta['formato']}: {'; '.join(v.falhas[:3])}")
+    return info, falhas
 
 
 def envelope(run_id: str, passo_id: str, *, _run: Optional[dict[str, Any]] = None,
@@ -1702,9 +1949,13 @@ def envelope(run_id: str, passo_id: str, *, _run: Optional[dict[str, Any]] = Non
     falhas += _conferir_entradas_do_worker(status, item, plano)
     portas: dict[str, Any] = {}
     resumos: dict[str, Any] = {}
-    assinatura: dict[str, list[int]] = {}
+    assinatura: dict[str, Any] = {}
     for nome, porta in item["portas"].items():
         arq = Path(porta["caminho"])
+        if porta.get("tipo") == "diretorio":
+            portas[nome], falhas_pasta = _porta_pasta(nome, porta, arq, inicio, fim, folga, sha_worker, assinatura)
+            falhas += falhas_pasta
+            continue
         info: dict[str, Any] = {"formato": porta["formato"], "caminho": porta["caminho"],
                                 "existe": arq.is_file()}
         portas[nome] = info
@@ -1778,6 +2029,16 @@ def _visao(run_id: str, run: dict[str, Any]) -> dict[str, Any]:
     faz um run existente — até concluído — responder 404. Run de antes desse registro usa o
     catálogo só para o que faltar, e a falta dele vira aviso, não erro."""
     resposta = {**run}
+    entradas = run.get("entradas")
+    if isinstance(entradas, dict) and any(isinstance(r, dict) and r.get("tipo") == "diretorio"
+                                          for r in entradas.values()):
+        # F6: o GET do run é o polling do n8n — uma pasta de 1024 membros (com o sha de cada
+        # um) iria a cada GET. Aqui só os 20 primeiros nomes; a lista completa está no plano.
+        resposta["entradas"] = {
+            n: ({**{k: v for k, v in r.items() if k != "membros"},
+                 "membros_amostra": sorted(r.get("membros") or {})[:_MAX_MEMBROS_AMOSTRA]}
+                if isinstance(r, dict) and r.get("tipo") == "diretorio" else r)
+            for n, r in entradas.items()}
     if "escolhas_opcoes" not in run or "passos_pipeline" not in run:
         try:
             p, _ = _pipeline(run["pipeline"])

@@ -73,6 +73,10 @@ class Contexto:
     parametros: Mapping[str, str]              # "<mod>.<script>.<param>" → valor (sub > espécie)
     arquivos: Mapping[str, Optional[str]]      # rótulo → sha256 (None = arquivo ausente)
     sha256: str
+    # F6 (adendo §A4 X5′, crítica M4): os `avisos` do subprojeto, para o plano, a mensagem ao
+    # redator e o HTML do relatório. Já estão cobertos pelo sha do subprojeto (_sha_subprojeto):
+    # o sha do contexto não muda, só o conteúdo dos planos novos.
+    avisos: tuple[str, ...] = ()
 
     @property
     def id(self) -> str:
@@ -95,7 +99,7 @@ class Contexto:
         """O que vai ao plano do run (e, com ele, ao plano_sha256 que o autor aprova)."""
         return {"especie": self.especie, "subprojeto": self.slug, "assembly": self.assembly,
                 "valores": dict(self.valores), "parametros": dict(self.parametros),
-                "arquivos": dict(self.arquivos), "sha256": self.sha256}
+                "arquivos": dict(self.arquivos), "sha256": self.sha256, "avisos": list(self.avisos)}
 
 
 @dataclass(frozen=True)
@@ -216,7 +220,8 @@ def resolver(especie: str, slug: str, *, cat: Optional[Catalogo] = None) -> Cont
     corpo = {"especie": especie, "subprojeto": slug, "assembly": sub.assembly,
              "valores": valores, "parametros": parametros, "arquivos": arquivos}
     return Contexto(especie, slug, sub.assembly, MappingProxyType(valores),
-                    MappingProxyType(parametros), MappingProxyType(arquivos), _sha_canonico(corpo))
+                    MappingProxyType(parametros), MappingProxyType(arquivos), _sha_canonico(corpo),
+                    tuple(str(a) for a in sub.avisos))
 
 
 def demo(*, cat: Optional[Catalogo] = None) -> Contexto:

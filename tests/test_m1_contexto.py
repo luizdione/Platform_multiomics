@@ -342,8 +342,11 @@ def test_pipelines_do_subprojeto():
     _rascunho()
     ob = contexto.obter_subprojeto
     ids = lambda regs: [p.id for p in regs]  # noqa: E731
-    assert ids(contexto.pipelines_do_subprojeto(ob("bos_taurus", "demo"))) == [
-        "transcriptomica_de", "genomica_painel", "genomica_regioes"]
+    # B1 (F6): a lista do demo é o `pipelines:` do próprio subprojeto.yaml (a F5 o edita uma vez)
+    yaml_demo = yaml.safe_load((REPO_ROOT / "projetos" / "bos_taurus" / "demo" / "subprojeto.yaml")
+                               .read_text(encoding="utf-8"))
+    assert ids(contexto.pipelines_do_subprojeto(ob("bos_taurus", "demo"))) == list(yaml_demo["pipelines"])
+    assert {"transcriptomica_de", "genomica_painel", "genomica_regioes"} <= set(yaml_demo["pipelines"])
     assert ids(contexto.pipelines_do_subprojeto(ob("bos_taurus", "demo"), "genomica")) == [
         "genomica_painel", "genomica_regioes"]
     assert ids(contexto.pipelines_do_subprojeto(ob("bos_taurus", "aula_granulosa_calor"))) == ["transcriptomica_de"]

@@ -382,15 +382,32 @@ def test_envio_formulario():
     assert envio_formulario(Entrada(formato="coldata", rotulo="x", modos=["copia", "referencia"])) == "caminho"
 
 
+# exemplo em /data/... é dado real do servidor: /data no container, E:/data no host (o conftest
+# isola GENOME_DATA num tmp, então não dá para resolver por ele). Sem o dado, o exemplo é pulado.
+_RAIZES_DADOS_REAIS = (Path("/data"), Path("E:/data"))
+
+
+def _arquivo_do_exemplo(exemplo: str):
+    if not exemplo.startswith("/data/"):
+        return REPO_ROOT / exemplo
+    resto = exemplo[len("/data/"):]
+    return next((r / resto for r in _RAIZES_DADOS_REAIS if (r / resto).exists()), None)
+
+
 def test_exemplos_das_entradas_passam_no_formato_e_no_nome():
     """O `exemplo` de cada entrada é o placeholder do formulário: tem de passar no validador
     e na regra de nome (do arquivo e de origem), como o registro o julgaria."""
     validos, _ = carregar_pipelines()
+    conferidos = 0
     for pid, p in validos.items():
         for nome, e in p.entradas.items():
-            arq = REPO_ROOT / e.exemplo
+            arq = _arquivo_do_exemplo(e.exemplo)
+            if arq is None:  # /data/... sem o dado real nesta máquina (CI)
+                continue
             v = formatos.validar_com_nome(e.formato, arq, nome_origem=arq.name)
             assert v.ok, (pid, nome, v.falhas)
+            conferidos += 1
+    assert conferidos >= 6  # os exemplos do repositório sempre são conferidos
 
 
 def _entrada(d: dict, nome: str, **campos) -> dict:
@@ -578,3 +595,184 @@ def test_invariantes_da_genomica_cada_um_reprova_sozinho(tmp_path, pid):
         (tmp_path / f"c{i}").mkdir()
         falhas = conferir_invariantes(_ficha(tmp_path / f"c{i}", p, mexido))
         assert len(falhas) == 1 and falhas[0].startswith(f"invariante {i} "), (ref, falhas)
+
+
+# ============================================================ F6: pasta e extensões
+# ESPEC §1.A.3 (C7–C10, P1) e §1.B (X1, X3, X5), adendo v2 §A4. O pipeline de pasta é o de
+# TESTE de tests/test_runs_diretorio.py (os da F6 são da F2/F3); o de invariantes por porta,
+# um scripts_api fingido que produz as tabelas do methylKit.
+def _pasta() -> tuple[dict, object]:
+    from test_runs_diretorio import PIPELINE, _manifest
+
+    return json.loads(json.dumps(PIPELINE)), _manifest()
+
+
+def _validar_pasta(dados: dict, m=None) -> list[str]:
+    return validar_contrato(Pipeline.model_validate(dados), m if m is not None else _pasta()[1])
+
+
+def _spec_teste(m, chave: str):
+    return next(s for s in m.scripts_api if s.key == chave)
+
+
+def test_f6_controle_pipeline_de_pasta_fecha_e_vai_por_caminho():
+    d, m = _pasta()
+    assert _validar_pasta(d, m) == []
+    p = Pipeline.model_validate(d)
+    assert envio_formulario(p.entradas["coverages"]) == "caminho"
+    assert envio_formulario(Entrada(formato="coverages_bismark", rotulo="x")) == "caminho"
+    assert envio_formulario(Entrada(formato="coldata", rotulo="x")) == "arquivo"
+
+
+@pytest.mark.parametrize("mexida,trecho", [
+    # C7: pasta só por cópia e nunca adaptável
+    (lambda d, m: d["entradas"]["coverages"].update(modos=["copia", "referencia"]), "exige modos ['copia']"),
+    (lambda d, m: d["entradas"]["coverages"].update(modos=["referencia"]), "exige modos ['copia']"),
+    (lambda d, m: d["entradas"]["coverages"].update(adaptavel=True), "adaptavel falso"),
+    # C8: porta de pasta é subpasta com nome, sem '.'; C4 continua (nada de '..' ou '/')
+    (lambda d, m: setattr(_spec_teste(m, "t_montar").produz["coverages"], "arquivo", "coverages.d"),
+     "é pasta e o arquivo 'coverages.d' tem '.'"),
+    (lambda d, m: setattr(_spec_teste(m, "t_montar").produz["coverages"], "arquivo", "../x"), "nome simples"),
+    # C9: quem consome pasta é tipo dir, e tipo dir só consome pasta
+    (lambda d, m: setattr(_spec_teste(m, "t_consumir").params[0], "tipo", "caminho"),
+     "consome 'coverages_por_condicao' com tipo 'caminho'"),
+    (lambda d, m: setattr(_spec_teste(m, "t_montar").params[1], "tipo", "dir"),
+     "consome 'coldata' com tipo 'dir'"),
+    # C10: duas portas no mesmo arquivo (e na mesma caixa dobrada)
+    (lambda d, m: setattr(_spec_teste(m, "t_montar").produz["montar_resumo"], "arquivo", "coverages"),
+     "gravam no mesmo arquivo"),
+    (lambda d, m: setattr(_spec_teste(m, "t_montar").produz["montar_resumo"], "arquivo", "COVERAGES"),
+     "gravam no mesmo arquivo"),
+], ids=["c7_ref_e_copia", "c7_so_ref", "c7_adaptavel", "c8_ponto", "c8_pai", "c9_caminho_pasta",
+        "c9_dir_arquivo", "c10_igual", "c10_caixa"])
+def test_f6_c7_a_c10_canarios(mexida, trecho):
+    d, m = _pasta()
+    mexida(d, m)
+    erros = _validar_pasta(d, m)
+    assert any(trecho in e for e in erros), erros
+
+
+@pytest.mark.parametrize("diferente_de,trecho", [
+    ("grupo_x", "diferente_de aponta para escolha inexistente"),
+    ("grupo_b", "diferente_de aponta para ela mesma"),
+    (None, None),  # controle: sem diferente_de
+    ("grupo_a", None),  # controle: o do pipeline de teste
+])
+def test_f6_x1_diferente_de_no_load(diferente_de, trecho):
+    d, m = _pasta()
+    d["escolhas_autor"]["grupo_b"]["diferente_de"] = diferente_de
+    erros = _validar_pasta(d, m)
+    if trecho:
+        assert any(trecho in e for e in erros), erros
+    else:
+        assert erros == []
+
+
+def test_f6_x1_diferente_de_com_outro_valores_de():
+    """O alvo existe, mas oferece OUTROS valores (outra entrada de coldata): 'iguais' não teria
+    sentido entre os dois."""
+    d, m = _pasta()
+    d["entradas"]["amostras2"] = {"formato": "coldata", "rotulo": "outra"}
+    d["escolhas_autor"]["grupo_b"]["valores_de"] = "amostras2.condicao"
+    d["checagens_entrada"].append({"tipo": "coverages_e_amostras", "coverages": "coverages", "amostras": "amostras2"})
+    erros = _validar_pasta(d, m)
+    assert any("tem outro valores_de ('amostras.condicao' × 'amostras2.condicao')" in e for e in erros), erros
+
+
+def _m_dmc():
+    """Manifest da epigenômica com um scripts_api fingido que produz as tabelas do methylKit,
+    a interseção e um resumo (invariantes por porta)."""
+    from omica.registry import ScriptSpec
+
+    m = load_registry().por_id("epigenomica").model_copy(deep=True)
+    m.scripts_api = [*m.scripts_api, ScriptSpec.model_validate({
+        "key": "t_dmc", "titulo": "t", "runtime": "image:omica-methyl",
+        "cmd": "python modules/epigenomica/scripts/perfil_tss.py --cov {coverages} --saida {saida}",
+        "params": [{"name": "coverages", "rotulo": "c", "tipo": "dir"}],
+        "consome": {"coverages": "coverages_bismark"},
+        "produz": {"dmc": {"arquivo": "dmc.tsv", "formato": "dmc_methylkit"},
+                   "todas_cpgs": {"arquivo": "todas_cpgs.tsv", "formato": "cpgs_methylkit"},
+                   "intersecao": {"arquivo": "intersecao.tsv", "formato": "tabela_intersecao_painel"},
+                   "dmc_resumo": {"arquivo": "dmc_resumo.json", "formato": "resumo_json"}}})]
+    return m
+
+
+RECONTAGEM_DMC = {"tipo": "recontagem", "porta": "dmc.todas_cpgs",
+                  "filtros": [{"coluna": "qvalue", "menor_que": "dmc.dmc_resumo.criterios.qvalue"},
+                              {"coluna": "meth.diff", "abs_maior_que": "dmc.dmc_resumo.criterios.diff_pct"}],
+                  "total": "dmc.dmc_resumo.n_dmc", "desempate": "dmc.dmc"}
+
+
+def _p_dmc(invariantes=None, alertas=None) -> dict:
+    padrao_inv = [dict(RECONTAGEM_DMC),
+                  {"tipo": "contagem_linhas", "porta": "dmc.dmc", "total": "dmc.dmc_resumo.n_dmc"},
+                  {"tipo": "soma_coluna", "porta": "dmc.intersecao", "coluna": "N_DMC", "total": "dmc.dmc_resumo.n_dmc"}]
+    padrao_al = [{"texto": "A seleção dos motifs é exploratória."},
+                 {"texto": "Empates de importância zero.", "fato": "dmc.dmc_resumo.empates", "igual": 1}]
+    return {"id": "t_dmc", "modulo": "epigenomica", "titulo": "t",
+            "entradas": {"coverages": {"formato": "coverages_bismark", "rotulo": "c"}},
+            "passos": [{"id": "dmc", "script": "t_dmc", "liga": {"coverages": "entrada.coverages"}}],
+            "relatorio": {"resumos": ["dmc.dmc_resumo"],
+                          "invariantes": padrao_inv if invariantes is None else invariantes,
+                          "alertas": padrao_al if alertas is None else alertas}}
+
+
+def test_f6_x3_x5_controle_invariantes_por_porta_e_alertas_fecham():
+    assert validar_contrato(Pipeline.model_validate(_p_dmc()), _m_dmc()) == []
+
+
+def _inv(**mudancas) -> list[dict]:
+    return [{**RECONTAGEM_DMC, **mudancas}]
+
+
+@pytest.mark.parametrize("invariantes,trecho", [
+    # X3: coluna do filtro que o validador não garante (meth_diff ≠ meth.diff)
+    (_inv(filtros=[{"coluna": "meth_diff", "abs_maior_que": "dmc.dmc_resumo.criterios.diff_pct"}]),
+     "colunas ['meth_diff'] não são garantidas"),
+    # X3: tabela E porta na mesma invariante
+    (_inv(tabela="dmc.todas_cpgs"), "tabela e porta na mesma invariante"),
+    # X3: porta que nenhum passo produz; porta que não é tabela (resumo)
+    (_inv(porta="dmc.nao_existe", desempate=None), "não é porta de nenhum passo"),
+    (_inv(porta="dmc.dmc_resumo", desempate=None), "não é tabela"),
+    # X3: filtro com dois limites, e filtro sem limite
+    (_inv(filtros=[{"coluna": "qvalue", "menor_que": "dmc.dmc_resumo.criterios.qvalue",
+                    "abs_maior_que": "dmc.dmc_resumo.criterios.qvalue"}]), "exatamente um limite"),
+    (_inv(filtros=[{"coluna": "qvalue"}]), "exatamente um limite"),
+    # X3: limite que não é campo de resumo declarado
+    (_inv(filtros=[{"coluna": "qvalue", "menor_que": "dmc.outro.q"}]), "não é campo de um resumo declarado"),
+    # X3: contagem_linhas sem porta; soma_coluna sem coluna; coluna que não é garantida
+    ([{"tipo": "contagem_linhas", "tabela": "dmc.dmc", "total": "dmc.dmc_resumo.n_dmc"}], "campos obrigatórios"),
+    ([{"tipo": "soma_coluna", "porta": "dmc.intersecao", "total": "dmc.dmc_resumo.n_dmc"}], "campos obrigatórios"),
+    ([{"tipo": "soma_coluna", "porta": "dmc.intersecao", "coluna": "N", "total": "dmc.dmc_resumo.n_dmc"}],
+     "colunas ['N'] não são garantidas"),
+    # X3′: desempate em outro tipo, porta inexistente, chave diferente nas duas portas
+    ([{"tipo": "contagem_linhas", "porta": "dmc.dmc", "total": "dmc.dmc_resumo.n_dmc", "desempate": "dmc.dmc"}],
+     "desempate só vale em recontagem com porta"),
+    (_inv(desempate="dmc.nao_existe"), "desempate 'dmc.nao_existe' não é porta"),
+    (_inv(desempate="dmc.intersecao"), "desempate exige a mesma chave de linha"),
+    (_inv(porta="dmc.intersecao", filtros=[{"coluna": "N_DMC", "menor_que": "dmc.dmc_resumo.n_dmc"}]),
+     "desempate exige a mesma chave de linha"),
+], ids=["coluna", "tabela_e_porta", "porta_inexistente", "porta_nao_tabela", "dois_limites", "sem_limite",
+        "limite_fora", "contagem_sem_porta", "soma_sem_coluna", "soma_coluna_fora", "desempate_outro_tipo",
+        "desempate_inexistente", "desempate_chave", "principal_sem_chave"])
+def test_f6_x3_canarios_no_load(invariantes, trecho):
+    erros = validar_contrato(Pipeline.model_validate(_p_dmc(invariantes=invariantes)), _m_dmc())
+    assert any(trecho in e for e in erros), erros
+
+
+def test_f6_x3_desempate_com_tabela_reprova():
+    """Desempate só com porta: com `tabela` (top-N dos fatos) não há tabela inteira."""
+    erros = validar_contrato(Pipeline.model_validate(_p_dmc(invariantes=_inv(porta="", tabela="dmc.dmc"))), _m_dmc())
+    assert any("desempate só vale em recontagem com porta" in e for e in erros), erros
+
+
+@pytest.mark.parametrize("alertas,trecho", [
+    ([{"texto": "x", "fato": "dmc.outro.empates", "igual": 1}], "não é campo de um resumo declarado"),
+    ([{"texto": "x", "fato": "dmc.dmc_resumo.empates"}], "`fato` e `igual` vêm juntos"),
+    ([{"texto": "x", "igual": 1}], "`fato` e `igual` vêm juntos"),
+    ([{"texto": "valor {{f:dmc.dmc_resumo.n_dmc}}"}], "sem placeholder"),
+    ([{"texto": "  "}], "texto vazio"),
+])
+def test_f6_x5_canarios_no_load(alertas, trecho):
+    erros = validar_contrato(Pipeline.model_validate(_p_dmc(alertas=alertas)), _m_dmc())
+    assert any(trecho in e for e in erros), erros

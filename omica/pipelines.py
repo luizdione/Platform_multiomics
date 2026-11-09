@@ -34,6 +34,15 @@ Genômica (F5, especificação G1 §0/§1.2 e crítica):
     adaptação grava um arquivo novo ao lado do original, que estaria na raiz de referência
     (C3); o `arquivo` de toda porta é um nome simples que passa na regra de nome do formato
     (C4: uma porta bed_regioes 'regioes.txt' seria lida 1-based pelo bcftools).
+
+F6 (ESPEC §1.A.3 e §1.B, adendo v2 §A4), cada regra com canário em tests/test_contrato.py:
+  - PASTA (formatos.DIRETORIOS) como entrada e como porta: a entrada de pasta vai por caminho
+    (`envio_formulario`), só por cópia e nunca adaptável (C7); a porta de pasta é uma SUBPASTA
+    com nome simples, sem '.' (C8); o parâmetro que consome pasta é `tipo: dir`, e `tipo: dir`
+    só consome pasta (C9); dois `produz` do mesmo script no mesmo `arquivo` reprovam (C10);
+  - escolhas distintas (`diferente_de`, X1); invariantes por PORTA, com `contagem_linhas`,
+    `soma_coluna`, o filtro `abs_maior_que` e o `desempate` da linha de borda (X3/X3′);
+    alertas do relatório (X5).
 """
 from __future__ import annotations
 
@@ -46,8 +55,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omica.chaves_contexto import ESPECIE_LEGADA, ID_ESPECIE
 from omica.config import REPO_ROOT
-from omica.contrato.formatos import (CHECAGENS, COLUNAS_CHAVE, COLUNAS_DE_NIVEL,
-                                     COLUNAS_GARANTIDAS, FORMATOS_CHECAGEM, IRMAOS,
+from omica.contrato.formatos import (CHAVE_LINHA, CHECAGENS, COLUNAS_CHAVE, COLUNAS_DE_NIVEL,
+                                     COLUNAS_GARANTIDAS, DIRETORIOS, FORMATOS_CHECAGEM, IRMAOS,
                                      REFERENCIAVEIS, VALIDADORES, regra_de_nome)
 from omica.registry import Manifest, ScriptSpec, campos_do_cmd, load_registry
 
@@ -74,21 +83,29 @@ class Entrada(BaseModel):
 def envio_formulario(e: Entrada) -> Literal["arquivo", "caminho"]:
     """Como o formulário do n8n pede a entrada: "caminho" (texto com um caminho no servidor)
     quando o formato tem arquivo irmão obrigatório (o índice não vai por upload: 422
-    entrada_exige_indice) ou quando a entrada aceita referência; "arquivo" (upload) no resto.
+    entrada_exige_indice), quando o formato é PASTA (F6: upload de pasta dá 422
+    entrada_exige_caminho) ou quando a entrada aceita referência; "arquivo" (upload) no resto.
     Fonte única: a API expõe e o builder do n8n usa esta mesma função."""
-    return "caminho" if (e.formato in IRMAOS or "referencia" in e.modos) else "arquivo"
+    caminho = e.formato in IRMAOS or e.formato in DIRETORIOS or "referencia" in e.modos
+    return "caminho" if caminho else "arquivo"
 
 
 class Checagem(BaseModel):
     model_config = ConfigDict(extra="allow")  # os campos dependem do tipo
     # em sincronia com formatos.CHECAGENS (teste em tests/test_contrato.py)
-    tipo: Literal["contagens_e_coldata", "vcf_tem_info_af", "vcf_contigs_ars_ucd", "vcf_e_bed"]
+    tipo: Literal["contagens_e_coldata", "vcf_tem_info_af", "vcf_contigs_ars_ucd", "vcf_e_bed",
+                  # F6 (adendo §A6.3)
+                  "vcf_e_rotulos", "coverages_e_amostras", "coverages_e_painel", "coverages_contigs_ars_ucd"]
 
 
 class Escolha(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rotulo: str
     valores_de: str  # "<entrada>.<coluna>": o autor só escolhe entre valores reais
+    # X1 (F6): outra escolha do MESMO valores_de que tem de receber valor diferente desta. Hoje
+    # grupo_a == grupo_b dá 0 DMC com rc 0, e classe_a == classe_b dá IndexError no
+    # ml_classificar; com isto, o plano responde 422 escolhas_iguais.
+    diferente_de: Optional[str] = None
 
 
 class Passo(BaseModel):
@@ -113,19 +130,45 @@ class Filtro(BaseModel):
     coluna: str
     menor_que: Optional[str] = None           # id de fato com o corte (ex.: de.de_resumo.criterios.padj)
     abs_maior_ou_igual: Optional[str] = None
+    # X3 (F6): o methylKit compara |meth.diff| com '>' (o demo tem uma CpG com |diff| = 15
+    # exatos: '>=' reconta 276, o selado tem 275)
+    abs_maior_que: Optional[str] = None
+
+
+_LIMITES_FILTRO = ("menor_que", "abs_maior_ou_igual", "abs_maior_que")
 
 
 class Invariante(BaseModel):
     """Conferência aritmética entre fatos (R4 do portão de números). Declarativa de
-    propósito: nada de expressão avaliada (`eval`) vinda de YAML."""
+    propósito: nada de expressão avaliada (`eval`) vinda de YAML.
+
+    F6 (X3): `porta` (`<passo>.<porta>`) recontar/contar/somar a tabela INTEIRA de uma porta,
+    em fluxo, conferida pelo sha256 do envelope — sem precisar declará-la em
+    relatorio.tabelas (que só leva o top-N). `desempate` (X3′, `<passo>.<porta>`): só na
+    recontagem por porta; a linha de borda (a menos da tolerância do limite) conta se a chave
+    dela (formatos.CHAVE_LINHA) está na porta de desempate — o que a ferramenta decidiu
+    sobre o double. Sem desempate, a recontagem é EXATA como antes."""
     model_config = ConfigDict(extra="forbid")
-    tipo: Literal["soma", "igual", "recontagem"]
+    tipo: Literal["soma", "igual", "recontagem", "contagem_linhas", "soma_coluna"]
     partes: list[str] = Field(default_factory=list)
     total: str = ""
     a: str = ""
     b: str = ""
     tabela: str = ""
     filtros: list[Filtro] = Field(default_factory=list)
+    porta: str = ""
+    coluna: str = ""
+    desempate: Optional[str] = None
+
+
+class Alerta(BaseModel):
+    """X5 (F6): frase que o relatório TEM de declarar. Sem `fato`, incondicional; com `fato`
+    (campo de um resumo declarado), só quando o valor dele é `igual`. O texto vai como está ao
+    redator e ao HTML (escapado): nada de placeholder nele."""
+    model_config = ConfigDict(extra="forbid")
+    texto: str
+    fato: str = ""
+    igual: Optional[int] = None
 
 
 class Relatorio(BaseModel):
@@ -134,6 +177,7 @@ class Relatorio(BaseModel):
     resumos: list[str] = Field(default_factory=list)
     tabelas: list[TabelaRelatorio] = Field(default_factory=list)
     invariantes: list[Invariante] = Field(default_factory=list)
+    alertas: list[Alerta] = Field(default_factory=list)
 
 
 class SeloPipeline(BaseModel):
@@ -191,6 +235,11 @@ def validar_contrato(p: Pipeline, m: Manifest) -> list[str]:
             if e.adaptavel:
                 erros.append(f"entrada {nome}: adaptavel não combina com modo referencia (a adaptação grava um "
                              "arquivo novo ao lado do original)")
+        # C7 (F6): pasta só entra por CÓPIA nesta fase (referência de pasta fica fora, ESPEC §6),
+        # e o adaptador não sabe ler pasta (ele reescreveria UM arquivo)
+        if e.formato in DIRETORIOS and (list(e.modos) != ["copia"] or e.adaptavel):
+            erros.append(f"entrada {nome}: formato de pasta {e.formato!r} exige modos ['copia'] e adaptavel falso "
+                         f"(veio modos {e.modos!r}, adaptavel {e.adaptavel})")
     for nome, esc in p.escolhas_autor.items():
         ent, sep, coluna = esc.valores_de.partition(".")
         if ent not in p.entradas:
@@ -202,6 +251,19 @@ def validar_contrato(p: Pipeline, m: Manifest) -> list[str]:
         if not sep or coluna not in niveis:
             erros.append(f"escolha {nome}: valores_de {esc.valores_de!r} não é coluna de nível garantida "
                          f"pelo formato {p.entradas[ent].formato!r} (aceitas: {list(niveis)})")
+    for nome, esc in p.escolhas_autor.items():
+        # X1: o alvo é OUTRA escolha que existe e oferece os mesmos valores (senão "iguais" não
+        # teria sentido, e o 422 nunca dispararia ou dispararia à toa)
+        if esc.diferente_de is None:
+            continue
+        outra = p.escolhas_autor.get(esc.diferente_de)
+        if esc.diferente_de == nome:
+            erros.append(f"escolha {nome}: diferente_de aponta para ela mesma")
+        elif outra is None:
+            erros.append(f"escolha {nome}: diferente_de aponta para escolha inexistente {esc.diferente_de!r}")
+        elif outra.valores_de != esc.valores_de:
+            erros.append(f"escolha {nome}: diferente_de {esc.diferente_de!r} tem outro valores_de "
+                         f"({outra.valores_de!r} × {esc.valores_de!r})")
     for c in p.checagens_entrada:
         campos = c.model_dump(exclude={"tipo"})
         exigidos = set(CHECAGENS[c.tipo][1])
@@ -291,6 +353,13 @@ def validar_contrato(p: Pipeline, m: Manifest) -> list[str]:
                 erros.append(f"{rotulo}: {par.name} consome {spec.consome[par.name]!r} e não foi ligado")
             elif par.name not in passo.liga and par.name not in passo.params and not par.default:
                 erros.append(f"{rotulo}: parâmetro {par.name!r} de {spec.key} ficou sem valor")
+            # C9 (F6): o sanitizador trata `dir` como caminho (dispatch._validar_valor); o tipo diz
+            # ao leitor do manifest, e ao formulário, que o valor é uma PASTA — nos dois sentidos
+            consumido = spec.consome.get(par.name)
+            if consumido is not None and (consumido in DIRETORIOS) != (par.tipo == "dir"):
+                erros.append(f"{rotulo}: {par.name} de {spec.key} consome {consumido!r} com tipo {par.tipo!r}: "
+                             "parâmetro que consome pasta precisa de tipo: dir, e tipo: dir só consome pasta")
+        arquivos_portas: dict[str, str] = {}
         for nome_porta, porta in spec.produz.items():
             if porta.formato not in VALIDADORES:
                 erros.append(f"{rotulo}: {spec.key} produz formato desconhecido {porta.formato!r}")
@@ -303,6 +372,18 @@ def validar_contrato(p: Pipeline, m: Manifest) -> list[str]:
             else:
                 erros += [f"{rotulo}: porta {nome_porta} de {spec.key}: {x}"
                           for x in regra_de_nome(porta.formato, porta.arquivo)]
+            # C8 (F6): porta de pasta é uma SUBPASTA com nome (nada de porta "."): sem ponto no
+            # nome, que é de subpasta e não de arquivo (coverages.d leria como extensão)
+            if porta.formato in DIRETORIOS and "." in porta.arquivo:
+                erros.append(f"{rotulo}: porta {nome_porta} de {spec.key} é pasta e o arquivo {porta.arquivo!r} tem '.': "
+                             "use um nome de subpasta simples (só letras, dígitos, '_' e '-')")
+            # C10 (F6): duas portas no MESMO arquivo — uma sobrescreve a outra (e no NTFS a caixa
+            # não distingue nomes)
+            dobra = porta.arquivo.casefold()
+            if dobra in arquivos_portas:
+                erros.append(f"{rotulo}: portas {arquivos_portas[dobra]} e {nome_porta} de {spec.key} gravam no mesmo "
+                             f"arquivo {porta.arquivo!r}")
+            arquivos_portas.setdefault(dobra, nome_porta)
         vistos[passo.id] = (passo, spec)
 
     def _porta(ref: str, formato: str, onde: str) -> None:
@@ -366,29 +447,91 @@ def validar_contrato(p: Pipeline, m: Manifest) -> list[str]:
     resumos = set(p.relatorio.resumos)
     tabelas = {f"{t.passo}.{t.porta}" for t in p.relatorio.tabelas}
 
-    def _ref(ref: str, onde: str) -> None:
+    def _ref(ref: str, onde: str, secao: str = "relatorio.invariantes") -> None:
         partes = ref.split(".")
         if len(partes) < 3 or ".".join(partes[:2]) not in resumos:
-            erros.append(f"relatorio.invariantes {onde}: {ref!r} não é campo de um resumo declarado")
+            erros.append(f"{secao} {onde}: {ref!r} não é campo de um resumo declarado")
+
+    def _formato_da_porta(ref: str) -> Optional[str]:
+        origem, _, campo = ref.partition(".")
+        if origem not in vistos or campo not in vistos[origem][1].produz:
+            return None
+        return vistos[origem][1].produz[campo].formato
 
     for i, inv in enumerate(p.relatorio.invariantes, start=1):
         onde = f"#{i} ({inv.tipo})"
+        # X3: recontagem e soma_coluna leem `tabela` (declarada em relatorio.tabelas) OU `porta`
+        # (a tabela inteira de uma porta); só um dos dois
+        uma_fonte = bool(inv.tabela) != bool(inv.porta)
         exigidos = {"soma": [inv.partes, inv.total], "igual": [inv.a, inv.b],
-                    "recontagem": [inv.tabela, inv.filtros, inv.total]}[inv.tipo]
+                    "recontagem": [uma_fonte, inv.filtros, inv.total],
+                    "contagem_linhas": [inv.porta, inv.total],
+                    "soma_coluna": [uma_fonte, inv.coluna, inv.total]}[inv.tipo]
+        if inv.tabela and inv.porta:
+            erros.append(f"relatorio.invariantes {onde}: tabela e porta na mesma invariante (use só uma das duas)")
+            continue
         if not all(exigidos):
             erros.append(f"relatorio.invariantes {onde}: campos obrigatórios do tipo ausentes")
+            continue
+        if inv.desempate is not None and (inv.tipo != "recontagem" or not inv.porta):
+            # X3′: o desempate lê a tabela INTEIRA das duas portas; `tabela` é só o top-N dos fatos
+            erros.append(f"relatorio.invariantes {onde}: desempate só vale em recontagem com porta")
             continue
         for ref in [*inv.partes, inv.total, inv.a, inv.b]:
             if ref:
                 _ref(ref, onde)
         for flt in inv.filtros:
-            limites = [x for x in (flt.menor_que, flt.abs_maior_ou_igual) if x]
-            if not limites:
-                erros.append(f"relatorio.invariantes {onde}: filtro em {flt.coluna!r} sem limite")
+            limites = [getattr(flt, x) for x in _LIMITES_FILTRO if getattr(flt, x)]
+            if len(limites) != 1:
+                # um filtro, um limite: dois no mesmo filtro dariam uma conta que ninguém declarou
+                erros.append(f"relatorio.invariantes {onde}: filtro em {flt.coluna!r} precisa de exatamente um "
+                             f"limite ({' | '.join(_LIMITES_FILTRO)}); veio {len(limites)}")
             for ref in limites:
                 _ref(ref, onde)
-        if inv.tipo == "recontagem" and inv.tabela not in tabelas:
-            erros.append(f"relatorio.invariantes {onde}: tabela {inv.tabela!r} não está em relatorio.tabelas")
+        formato: Optional[str] = None
+        if inv.porta:
+            formato = _formato_da_porta(inv.porta)
+            if formato is None:
+                erros.append(f"relatorio.invariantes {onde}: porta {inv.porta!r} não é porta de nenhum passo")
+                continue
+        elif inv.tabela:
+            if inv.tabela not in tabelas:
+                erros.append(f"relatorio.invariantes {onde}: tabela {inv.tabela!r} não está em relatorio.tabelas")
+                continue
+            formato = _formato_da_porta(inv.tabela)
+        if formato is not None:
+            # a coluna do filtro só reprovava no relatório (portão R4, "referência inválida"),
+            # depois do run inteiro: agora é conferida no load, contra o que o validador garante
+            garantidas = COLUNAS_GARANTIDAS.get(formato)
+            if garantidas is None:
+                erros.append(f"relatorio.invariantes {onde}: formato {formato!r} não é tabela")
+                continue
+            citadas = [*(flt.coluna for flt in inv.filtros), *([inv.coluna] if inv.coluna else [])]
+            fora = [c for c in citadas if c not in garantidas]
+            if fora:
+                erros.append(f"relatorio.invariantes {onde}: colunas {fora} não são garantidas pelo validador de "
+                             f"{formato!r} (garantidas: {list(garantidas)})")
+        if inv.desempate is not None:
+            # X3′: as duas portas com a MESMA chave de linha (formatos.CHAVE_LINHA)
+            f_desempate = _formato_da_porta(inv.desempate)
+            if f_desempate is None:
+                erros.append(f"relatorio.invariantes {onde}: desempate {inv.desempate!r} não é porta de nenhum passo")
+                continue
+            chave_p, chave_d = CHAVE_LINHA.get(formato or ""), CHAVE_LINHA.get(f_desempate)
+            if chave_p is None or chave_d is None or chave_p != chave_d:
+                erros.append(f"relatorio.invariantes {onde}: desempate exige a mesma chave de linha nas duas portas "
+                             f"(formatos.CHAVE_LINHA: {formato!r} → {chave_p}, {f_desempate!r} → {chave_d})")
+
+    # X5: alertas do relatório
+    for i, al in enumerate(p.relatorio.alertas, start=1):
+        onde = f"#{i}"
+        if not al.texto.strip() or "{{" in al.texto or "}}" in al.texto:
+            erros.append(f"relatorio.alertas {onde}: texto vazio ou com '{{{{'/'}}}}' (o alerta vai como está, "
+                         "sem placeholder)")
+        if bool(al.fato) != (al.igual is not None):
+            erros.append(f"relatorio.alertas {onde}: `fato` e `igual` vêm juntos (os dois ou nenhum)")
+        if al.fato:
+            _ref(al.fato, onde, "relatorio.alertas")
     return erros
 
 

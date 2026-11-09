@@ -27,6 +27,9 @@ from omica.config import REPO_ROOT, reset_config_cache
 from omica.contrato import bgzf, formatos
 from omica.jobs import dispatch, queue, script_job
 from test_formatos_genomica import _demo, escrever_bcf, escrever_csi, escrever_tbi, escrever_vcf, sintetico
+from test_runs_diretorio import _plano as _plano_pasta
+from test_runs_diretorio import _registrado as _registrado_pasta
+from test_runs_diretorio import pasta  # noqa: F401 (fixture: o pipeline de PASTA de teste, F6)
 from test_runs import _aprovado, _com_entradas, _concluir, api, lancados  # noqa: F401 (fixtures)
 
 GEN = REPO_ROOT / "modules" / "genomica"
@@ -802,9 +805,11 @@ def test_r12_impressao_mexida_no_plano_e_adulteracao(api, lancados, raiz, cfg):
     assert lancados == []
 
 
-def test_r12_todo_campo_do_registro_entra_no_plano(api, raiz, cfg):
+def test_r12_todo_campo_do_registro_entra_no_plano(api, raiz, cfg, pasta):
     """Canário estrutural da lista branca: para todo modo, o registro inteiro (menos o
-    veredito) está no plano — um campo novo fora da lista ficaria fora do sha aprovado."""
+    veredito) está no plano — um campo novo fora da lista ficaria fora do sha aprovado. F6: e
+    para a PASTA (tipo, regra, membros, n_membros), com o pipeline de teste de
+    test_runs_diretorio."""
     rid, _ = _pronto(api, raiz)
     caixa = cfg.data_dir / "entradas"
     caixa.mkdir(parents=True, exist_ok=True)
@@ -812,14 +817,18 @@ def test_r12_todo_campo_do_registro_entra_no_plano(api, raiz, cfg):
     _sobe_bed(api, rid_copia)
     assert _por_caminho(api, rid_copia, "vcf", sintetico(caixa, "c.vcf.gz")).status_code == 200
     rid_tr = _com_entradas(api)
+    rid_pasta = _registrado_pasta(api)
     planos = {rid: _plano(api, rid), rid_copia: _plano(api, rid_copia),
-              rid_tr: api.post(f"/api/v1/runs/{rid_tr}/plano", json={"escolhas": {"referencia": "winter_control"}}).json()}
-    modos = set()
+              rid_tr: api.post(f"/api/v1/runs/{rid_tr}/plano", json={"escolhas": {"referencia": "winter_control"}}).json(),
+              rid_pasta: _plano_pasta(api, rid_pasta).json()}
+    modos, tipos = set(), set()
     for r_id, plano in planos.items():
         for n, reg in runs._carregar(r_id)["entradas"].items():
             modos.add(reg.get("modo"))
+            tipos.add(reg.get("tipo"))
             assert set(reg) - {"veredito"} <= set(plano["entradas"][n]), (n, set(reg) - set(plano["entradas"][n]))
-    assert modos == {"copia", "referencia"}
+    assert modos == {"copia", "referencia"} and tipos == {None, "diretorio"}
+    assert set(planos[rid_pasta]["entradas"]["coverages"]) >= {"tipo", "regra", "membros", "n_membros"}
 
 
 # ================================================================ R13 conteúdo
