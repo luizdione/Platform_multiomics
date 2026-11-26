@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite it as below."
+title: "Platform_multiomics: unified local multi-omics platform (genomics, epigenomics, transcriptomics, and machine learning)"
+abstract: >-
+  A unified, container-orchestrated local platform for multi-species omics
+  analysis integrating genomics (SnpEff, VEP, Fst), epigenomics (methylKit
+  DMCs, TSS profiles, HOMER motifs, MOFA2), transcriptomics (SRA, FastQC/MultiQC,
+  Salmon, DESeq2), and machine learning (nested cross-validation, SHAP, minimal
+  AIMs panels), with workflow provenance seals, n8n integration, and an offline
+  educational mode. Consolidates and supersedes the legacy Platform_genomes and
+  Platform_epigenome repositories.
+type: software
+authors:
+  - family-names: "De-Melo"
+    given-names: "Luiz Dione Barbosa"
+    orcid: "https://orcid.org/0000-0003-2445-9943"
+    email: "luiz.melo@ifrj.edu.br"
+    affiliation: >-
+      Instituto Federal de Educação, Ciência e Tecnologia do Rio de Janeiro (IFRJ),
+      Rio de Janeiro, Brazil
+version: "1.0.0"
+date-released: "2026-11-26"
+repository-code: "https://github.com/luizdione/Platform_multiomics"
+url: "https://github.com/luizdione/Platform_multiomics"
+keywords:
+  - multi-omics
+  - genomics
+  - epigenomics
+  - transcriptomics
+  - machine learning
+  - bioinformatics
+  - reproducibility
+  - docker
